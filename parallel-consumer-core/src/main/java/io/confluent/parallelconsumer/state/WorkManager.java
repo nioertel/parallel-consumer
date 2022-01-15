@@ -527,6 +527,18 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
     }
 
     /**
+     * Have our partitions been revoked? Can a batch contain messages of different epochs?
+     *
+     * @return true if any epoch is stale, false if not
+     */
+    public boolean checkEpochIsStale(final List<WorkContainer<K, V>> workContainers) {
+        for (final WorkContainer<K, V> workContainer : workContainers) {
+            if (checkEpochIsStale(workContainer)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Have our partitions been revoked?
      *
      * @return true if epoch doesn't match, false if ok

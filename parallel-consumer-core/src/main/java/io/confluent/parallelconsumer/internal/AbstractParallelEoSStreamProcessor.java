@@ -22,6 +22,7 @@ import org.apache.kafka.clients.consumer.internals.ConsumerCoordinator;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.MDC;
+import pl.tlinkowski.unij.api.UniLists;
 
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static io.confluent.csid.utils.BackportUtils.isEmpty;
 import static io.confluent.csid.utils.BackportUtils.toSeconds;
@@ -54,7 +56,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     public static final String MDC_INSTANCE_ID = "pcId";
 
     @Getter(PROTECTED)
-    private final ParallelConsumerOptions options;
+    protected final ParallelConsumerOptions options;
 
     /**
      * Injectable clock for testing
@@ -84,7 +86,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     /**
      * The pool which is used for running the users's supplied function
      */
-    private final ThreadPoolExecutor workerPool;
+    protected final ThreadPoolExecutor workerPool;
 
     private Optional<Future<Boolean>> controlThreadFuture = Optional.empty();
 
@@ -540,7 +542,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     @Getter
     private Optional<String> myId = Optional.empty();
 
-    protected <R> void supervisorLoop(Function<ConsumerRecord<K, V>, List<R>> userFunction,
+    protected <R> void supervisorLoop(Function<List<ConsumerRecord<K, V>>, List<R>> userFunction,
                                       Consumer<R> callback) {
         log.info("Control loop starting up...");
 
@@ -595,7 +597,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     /**
      * Main control loop
      */
-    private <R> void controlLoop(Function<ConsumerRecord<K, V>, List<R>> userFunction,
+    private <R> void controlLoop(Function<List<ConsumerRecord<K, V>>, List<R>> userFunction,
                                  Consumer<R> callback) throws TimeoutException, ExecutionException, InterruptedException {
 
         //
@@ -650,7 +652,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
                 wm.getTotalWorkWaitingProcessing(), wm.getNumberOfEntriesInPartitionQueues(), wm.getNumberRecordsOutForProcessing(), state);
     }
 
-    private <R> int handleWork(final Function<ConsumerRecord<K, V>, List<R>> userFunction, final Consumer<R> callback) {
+    private <R> int handleWork(final Function<List<ConsumerRecord<K, V>>, List<R>> userFunction, final Consumer<R> callback) {
         // check queue pressure first before addressing it
         checkPressure();
 
@@ -677,6 +679,71 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
         return gotWorkCount;
     }
+
+    /**
+     * Submit a piece of work to the processing pool.
+     *
+     * @param workToProcess the polled records to process
+     */
+    protected <R> void submitWorkToPool(Function<List<ConsumerRecord<K, V>>, List<R>> usersFunction,
+                                        Consumer<R> callback,
+                                        List<WorkContainer<K, V>> workToProcess) {
+        if (!workToProcess.isEmpty()) {
+            log.debug("New work incoming: {}, Pool stats: {}", workToProcess.size(), workerPool);
+            if (options.getBatchSize().isPresent()) {
+                // perf: could inline makeBatches
+                var batches = makeBatches(workToProcess);
+                for (var batch : batches) {
+                    submitWorkToPoolInner(usersFunction, callback, batch);
+                }
+            } else {
+                for (var batch : workToProcess) {
+                    submitWorkToPoolInner(usersFunction, callback, UniLists.of(batch));
+                }
+            }
+        }
+    }
+
+    private <R> void submitWorkToPoolInner(final Function<List<ConsumerRecord<K, V>>, List<R>> usersFunction, final Consumer<R> callback, final List<WorkContainer<K, V>> batch) {
+        // for each record, construct dispatch to the executor and capture a Future
+        log.trace("Sending work ({}) to pool", batch);
+        Future outputRecordFuture = workerPool.submit(() -> {
+            addInstanceMDC();
+            return runUserFunction(usersFunction, callback, batch);
+        });
+        // for a batch, each message in the batch shares the same result
+        for (final WorkContainer<K, V> workContainer : batch) {
+            workContainer.setFuture(outputRecordFuture);
+        }
+    }
+
+    private List<List<WorkContainer<K, V>>> makeBatches(List<WorkContainer<K, V>> workToProcess) {
+        return partition(workToProcess, (int) options.getBatchSize().get());
+    }
+
+    private static <T> List<List<T>> partition(Collection<T> sourceCollection, int maxBatchSize) {
+        List<List<T>> listOfBatches = new ArrayList<>();
+        List<T> batchInConstruction = new ArrayList<>();
+
+        //
+        for (T item : sourceCollection) {
+            batchInConstruction.add(item);
+
+            //
+            if (batchInConstruction.size() == maxBatchSize) {
+                listOfBatches.add(batchInConstruction);
+                batchInConstruction = new ArrayList<>();
+            }
+        }
+
+        // add partial tail
+        if (!batchInConstruction.isEmpty()) {
+            listOfBatches.add(batchInConstruction);
+        }
+
+        return listOfBatches;
+    }
+
 
     /**
      * Pluggable interface for instructing the framework how many work units to attempt to retreive from the work
@@ -904,53 +971,47 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         lastCommitCheckTime = Instant.now();
     }
 
-    /**
-     * Submit a piece of work to the processing pool.
-     *
-     * @param workToProcess the polled records to process
-     */
-    protected <R> void submitWorkToPool(Function<ConsumerRecord<K, V>, List<R>> usersFunction,
-                                        Consumer<R> callback,
-                                        List<WorkContainer<K, V>> workToProcess) {
-        if (!workToProcess.isEmpty()) {
-            log.debug("New work incoming: {}, Pool stats: {}", workToProcess.size(), workerPool);
-            for (var work : workToProcess) {
-                // for each record, construct dispatch to the executor and capture a Future
-                log.trace("Sending work ({}) to pool", work);
-                Future<List<?>> outputRecordFuture = workerPool.submit(() -> {
-                    addInstanceMDC();
-                    return userFunctionRunner(usersFunction, callback, work);
-                });
-                work.setFuture(outputRecordFuture);
-            }
-        }
-    }
+
 
     /**
      * Run the supplied function.
      */
-    protected <R> List<ParallelConsumer.Tuple<ConsumerRecord<K, V>, R>> userFunctionRunner(Function<ConsumerRecord<K, V>, List<R>> usersFunction,
+    protected <R> List<ParallelConsumer.Tuple<ConsumerRecord<K, V>, R>> runUserFunction(Function<List<ConsumerRecord<K, V>>, List<R>> usersFunction,
                                                                                            Consumer<R> callback,
-                                                                                           WorkContainer<K, V> wc) {
+                                                                                           List<WorkContainer<K, V>> workContainerBatch) {
         // call the user's function
         List<R> resultsFromUserFunction;
         try {
-            MDC.put("offset", wc.toString());
+            if (log.isDebugEnabled()) {
+                // toString can be heavy, especially for large batch sizes
+                MDC.put("offset", workContainerBatch.toString());
+            }
+            log.trace("Pool received: {}", workContainerBatch);
 
             //
-            boolean epochIsStale = wm.checkEpochIsStale(wc);
+            List<ConsumerRecord<K, V>> records = workContainerBatch.stream()
+                    .map(WorkContainer::getCr)
+                    .collect(Collectors.toList());
+            log.trace("Pool received: {}", workContainerBatch);
+
+            //
+            boolean epochIsStale = wm.checkEpochIsStale(workContainerBatch);
             if (epochIsStale) {
                 // when epoch's change, we can't remove them from the executor pool queue, so we just have to skip them when we find them
-                log.debug("Pool found work from old generation of assigned work, skipping message as epoch doesn't match current {}", wc);
+                log.debug("Pool found work from old generation of assigned work, skipping message as epoch doesn't match current {}", workContainerBatch);
                 return null;
             }
 
-            log.trace("Pool received: {}", wc);
+            resultsFromUserFunction = usersFunction.apply(records);
 
-            ConsumerRecord<K, V> rec = wc.getCr();
-            resultsFromUserFunction = usersFunction.apply(rec);
+            for (final WorkContainer<K, V> kvWorkContainer : workContainerBatch) {
+                onUserFunctionSuccess(kvWorkContainer, resultsFromUserFunction);
+            }
+            resultsFromUserFunction = usersFunction.apply(records);
 
-            onUserFunctionSuccess(wc, resultsFromUserFunction);
+            for (var kvWorkContainer : workContainerBatch) {
+                onUserFunctionSuccess(kvWorkContainer, resultsFromUserFunction);
+            }
 
             // capture each result, against the input record
             var intermediateResults = new ArrayList<Tuple<ConsumerRecord<K, V>, R>>();
@@ -958,15 +1019,20 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
                 log.trace("Running users call back...");
                 callback.accept(result);
             }
-            log.trace("User function future registered");
             // fail or succeed, either way we're done
-            addToMailBoxOnUserFunctionSuccess(wc, resultsFromUserFunction);
+            for (var kvWorkContainer : workContainerBatch) {
+                addToMailBoxOnUserFunctionSuccess(kvWorkContainer, resultsFromUserFunction);
+            }
+            log.trace("User function future registered");
+
             return intermediateResults;
         } catch (Exception e) {
             // handle fail
             log.error("Exception caught in user function running stage, registering WC as failed, returning to mailbox", e);
-            wc.onUserFunctionFailure();
-            addToMailbox(wc); // always add on error
+            for (var wc: workContainerBatch) {
+                wc.onUserFunctionFailure();
+                addToMailbox(wc); // always add on error
+            }
             throw e; // trow again to make the future failed
         }
     }

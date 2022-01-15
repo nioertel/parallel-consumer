@@ -8,8 +8,10 @@ import io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor
 import io.confluent.parallelconsumer.internal.DrainingCloseable;
 import lombok.Data;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
@@ -48,6 +50,20 @@ public interface ParallelConsumer<K, V> extends DrainingCloseable {
      * @see org.apache.kafka.clients.consumer.KafkaConsumer#subscribe(Pattern, ConsumerRebalanceListener)
      */
     void subscribe(Pattern pattern, ConsumerRebalanceListener callback);
+
+    /**
+     * Register a function to be applied to a batch of messages.
+     * <p>
+     * The system will treat the messages as a set, so if an error is thrown by the user code, then all messages will be
+     * marked as failed and be retried (Note that when they are retried, there is no guarantee they will all be in the
+     * same batch again). So if you're going to process messages individually, then don't use this function.
+     * <p>
+     * Otherwise, if you're going to process messages in sub sets from this batch, it's better to instead adjust the
+     * {@link ParallelConsumerOptions#getBatchSize()} instead to the actual desired size, and process them as a whole.
+     *
+     * @see ParallelConsumerOptions#getBatchSize()
+     */
+    void pollBatch(Consumer<List<ConsumerRecord<K, V>>> usersVoidConsumptionFunction);
 
     /**
      * A simple tuple structure.
