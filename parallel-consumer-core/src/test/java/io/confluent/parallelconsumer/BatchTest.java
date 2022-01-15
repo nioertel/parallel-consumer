@@ -27,7 +27,6 @@ public class BatchTest extends ParallelEoSStreamProcessorTestBase {
 
     @ParameterizedTest
     @EnumSource
-    @Test
     void batch(ParallelConsumerOptions.ProcessingOrder order) {
         int numRecs = 5;
         int batchSize = 2;
@@ -59,41 +58,6 @@ public class BatchTest extends ParallelEoSStreamProcessorTestBase {
                 .allSatisfy(x -> assertThat(x).hasSizeLessThanOrEqualTo(batchSize))
                 .as("all messages processed")
                 .flatExtracting(x -> x).hasSameElementsAs(recs);
-    }
-
-    @Test
-    public void test2() throws InterruptedException {
-        int numRecs = 5;
-        int batchSize = 2;
-        super.setupParallelConsumerInstance(ParallelConsumerOptions.builder()
-                .batchSize(batchSize)
-                .ordering(ParallelConsumerOptions.ProcessingOrder.UNORDERED)
-                .build());
-        var recs = ktu.sendRecords(numRecs);
-        recs.forEach(r -> log.info(r.toString()));
-        List<List<ConsumerRecord<String, String>>> received = new ArrayList<>();
-        List<ConsumerRecord<String, String>> records = new ArrayList<>();
-
-        //
-        parallelConsumer.pollBatch(x -> {
-            log.info("Batch of messages: {}", toOffsets(x));
-            received.add(x);
-            records.addAll(x);
-        });
-
-        long start = System.currentTimeMillis();
-        while (start + 1000 > System.currentTimeMillis()) {
-            Thread.sleep(100);
-            log.info(records.toString());
-            log.info(String.valueOf(records.size()));
-        }
-
-        waitAtMost(ofSeconds(1)).alias("expected number of records")
-                .untilAsserted(() -> {
-                    assertThat(records).hasSize(5);
-                });
-
-        log.info(received.toString());
     }
 
     private List<Long> toOffsets(final List<ConsumerRecord<String, String>> x) {
