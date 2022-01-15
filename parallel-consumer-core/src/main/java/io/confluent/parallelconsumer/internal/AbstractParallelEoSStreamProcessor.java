@@ -992,9 +992,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             List<ConsumerRecord<K, V>> records = workContainerBatch.stream()
                     .map(WorkContainer::getCr)
                     .collect(Collectors.toList());
-            log.trace("Pool received: {}", workContainerBatch);
-
-            //
             boolean epochIsStale = wm.checkEpochIsStale(workContainerBatch);
             if (epochIsStale) {
                 // when epoch's change, we can't remove them from the executor pool queue, so we just have to skip them when we find them
@@ -1005,11 +1002,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             resultsFromUserFunction = usersFunction.apply(records);
 
             for (final WorkContainer<K, V> kvWorkContainer : workContainerBatch) {
-                onUserFunctionSuccess(kvWorkContainer, resultsFromUserFunction);
-            }
-            resultsFromUserFunction = usersFunction.apply(records);
-
-            for (var kvWorkContainer : workContainerBatch) {
                 onUserFunctionSuccess(kvWorkContainer, resultsFromUserFunction);
             }
 
