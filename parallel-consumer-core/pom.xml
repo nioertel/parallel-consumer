@@ -8,14 +8,13 @@
     <parent>
         <groupId>io.confluent.parallelconsumer</groupId>
         <artifactId>parallel-consumer-parent</artifactId>
-        <version>0.4.0.2-SNAPSHOT</version>
+        <version>0.4.0.2-batching-1</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>parallel-consumer-core</artifactId>
     <name>Confluent Parallel Consumer Core</name>
-    <version>0.4.0.2-batching3-SNAPSHOT</version>
 
     <properties>
     </properties>
