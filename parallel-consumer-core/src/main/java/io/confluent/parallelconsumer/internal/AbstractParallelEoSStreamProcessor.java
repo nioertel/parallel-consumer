@@ -740,6 +740,10 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             listOfBatches.add(batchInConstruction);
         }
 
+        log.debug("sourceCollection.size() {}, batches: {}, batch sizes {}",
+                sourceCollection.size(),
+                listOfBatches.size(),
+                listOfBatches.stream().map(List::size).collect(Collectors.toList()));
         return listOfBatches;
     }
 
@@ -771,13 +775,14 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     protected void checkPressure() {
         boolean moreWorkInQueuesAvailableThatHaveNotBeenPulled = wm.getWorkQueuedInMailboxCount() > options.getMaxConcurrency();
         if (log.isTraceEnabled())
-            log.trace("Queue pressure check: (current size: {}, loaded target: {}, factor: {}) if (isPoolQueueLow() {} && dynamicExtraLoadFactor.isWarmUpPeriodOver() {} && moreWorkInQueuesAvailableThatHaveNotBeenPulled {})",
+            log.trace("Queue pressure check: (current size: {}, loaded target: {}, factor: {}) " +
+                            "if (isPoolQueueLow() {} && moreWorkInQueuesAvailableThatHaveNotBeenPulled {} && lastWorkRequestWasFulfilled {}))",
                     getWorkerQueueSize(),
                     getQueueTargetLoaded(),
                     dynamicExtraLoadFactor.getCurrentFactor(),
                     isPoolQueueLow(),
-                    dynamicExtraLoadFactor.isWarmUpPeriodOver(),
-                    moreWorkInQueuesAvailableThatHaveNotBeenPulled);
+                    moreWorkInQueuesAvailableThatHaveNotBeenPulled,
+                    lastWorkRequestWasFulfilled);
 
         if (isPoolQueueLow()
                 && moreWorkInQueuesAvailableThatHaveNotBeenPulled
