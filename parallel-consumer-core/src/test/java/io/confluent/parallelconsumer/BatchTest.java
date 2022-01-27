@@ -11,6 +11,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.PARTITION;
@@ -24,6 +25,43 @@ import static org.awaitility.Awaitility.waitAtMost;
  */
 @Slf4j
 public class BatchTest extends ParallelEoSStreamProcessorTestBase {
+
+    @Test
+    void averageBatchSizeTest() {
+        int numRecs = 5000;
+        int batchSize = 10;
+        super.setupParallelConsumerInstance(ParallelConsumerOptions.builder()
+                .batchSize(batchSize)
+                .ordering(ParallelConsumerOptions.ProcessingOrder.UNORDERED)
+                .maxConcurrency(12)
+                .build());
+        ktu.sendRecords(numRecs);
+        var numBatches = new AtomicInteger(0);
+        var numRecords = new AtomicInteger(0);
+        long start = System.currentTimeMillis();
+        parallelConsumer.pollBatch(recordList -> {
+            numBatches.getAndIncrement();
+            numRecords.addAndGet(recordList.size());
+            try {
+                Thread.sleep(30);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            log.info(
+                    "Processed {} records in {} batches with average size {}",
+                    numRecords.get(),
+                    numBatches.get(),
+                    numRecords.get() / (0.0 + numBatches.get())
+            );
+        });
+        waitAtMost(ofSeconds(20)).alias("expected number of records")
+                .untilAsserted(() -> {
+                    assertThat(numRecords.get()).isEqualTo(numRecs);
+                });
+        var duration = System.currentTimeMillis() - start;
+        log.info("Processed {} records in {} ms. This is {} records per second. " , numRecs, duration, numRecs / (duration / 1000.0));
+        assertThat(numRecords.get() / (0.0 + numBatches.get())).isGreaterThan(batchSize - 1);
+    }
 
     @ParameterizedTest
     @EnumSource
