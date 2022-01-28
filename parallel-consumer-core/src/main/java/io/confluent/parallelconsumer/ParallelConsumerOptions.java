@@ -110,6 +110,26 @@ public class ParallelConsumerOptions<K, V> {
     }
 
     /**
+     * When using batching, the initialDynamicLoadFactor must be higher than without batching.
+     * It could be set to batchsize * 2, but it is exposed here for providing the user a configuration option.
+     * When it is not set, the defaultInitialLoadingFactor specified in
+     * {@link io.confluent.parallelconsumer.internal.DynamicLoadFactor} is used.
+     */
+
+    private final Integer initialDynamicLoadFactor;
+
+    /**
+     * When using batching, the received batch size often is considerably lower than the requested batch size.
+     * This may be a problem when a certain batch size is expected for communication with an external system
+     * (e.g. a Web Service that works best when sending 50 events per request).
+     * This parameter allows slowing down the processor thread, such that enough messages are received to closely
+     * fulfill the requested batch size.
+     */
+
+    @Builder.Default
+    public final Integer processorDelayMs = 0;
+
+    /**
      * The {@link ProcessingOrder} type to use
      */
     @Builder.Default

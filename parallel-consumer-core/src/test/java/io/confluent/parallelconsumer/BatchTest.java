@@ -29,11 +29,14 @@ public class BatchTest extends ParallelEoSStreamProcessorTestBase {
     @Test
     void averageBatchSizeTest() {
         int numRecs = 5000;
-        int batchSize = 10;
+        int batchSize = 5;
+        int maxConcurrency = 8;
         super.setupParallelConsumerInstance(ParallelConsumerOptions.builder()
                 .batchSize(batchSize)
                 .ordering(ParallelConsumerOptions.ProcessingOrder.UNORDERED)
-                .maxConcurrency(12)
+                .maxConcurrency(maxConcurrency)
+                .processorDelayMs(30)
+                .initialDynamicLoadFactor(batchSize * 100)
                 .build());
         ktu.sendRecords(numRecs);
         var numBatches = new AtomicInteger(0);
@@ -47,20 +50,22 @@ public class BatchTest extends ParallelEoSStreamProcessorTestBase {
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
-            log.info(
-                    "Processed {} records in {} batches with average size {}",
-                    numRecords.get(),
-                    numBatches.get(),
-                    numRecords.get() / (0.0 + numBatches.get())
-            );
+            if (numRecords.get() % 100 == 0) {
+                log.info(
+                        "Processed {} records in {} batches with average size {}",
+                        numRecords.get(),
+                        numBatches.get(),
+                        numRecords.get() / (0.0 + numBatches.get())
+                );
+            }
         });
-        waitAtMost(ofSeconds(20)).alias("expected number of records")
+        waitAtMost(ofSeconds(200)).alias("expected number of records")
                 .untilAsserted(() -> {
                     assertThat(numRecords.get()).isEqualTo(numRecs);
                 });
         var duration = System.currentTimeMillis() - start;
         log.info("Processed {} records in {} ms. This is {} records per second. " , numRecs, duration, numRecs / (duration / 1000.0));
-        assertThat(numRecords.get() / (0.0 + numBatches.get())).isGreaterThan(batchSize - 1);
+        assertThat(numRecords.get() / (0.0 + numBatches.get())).isGreaterThan(batchSize * 0.9);
     }
 
     @ParameterizedTest

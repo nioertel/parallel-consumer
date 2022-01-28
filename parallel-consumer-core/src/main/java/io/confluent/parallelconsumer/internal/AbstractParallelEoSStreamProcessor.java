@@ -131,7 +131,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
      * Multiple of {@link ParallelConsumerOptions#getMaxConcurrency()} to have in our processing queue, in order to make
      * sure threads always have work to do.
      */
-    protected final DynamicLoadFactor dynamicExtraLoadFactor = new DynamicLoadFactor();
+    protected final DynamicLoadFactor dynamicExtraLoadFactor;
 
     /**
      * If the system failed with an exception, it is referenced here.
@@ -193,6 +193,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         options = newOptions;
         options.validate();
 
+        this.dynamicExtraLoadFactor = new DynamicLoadFactor(options);
         this.consumer = options.getConsumer();
 
         checkGroupIdConfigured(consumer);
