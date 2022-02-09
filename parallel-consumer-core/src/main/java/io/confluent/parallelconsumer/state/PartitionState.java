@@ -123,12 +123,12 @@ public class PartitionState<K, V> {
         truncateOffsets(newLowWaterMark);
     }
 
-    public boolean isRecordPreviouslyProcessed(final ConsumerRecord<K, V> rec) {
+    public boolean isRecordPreviouslyCompleted(final ConsumerRecord<K, V> rec) {
         Set<Long> incompleteOffsets = this.incompleteOffsets;
         boolean previouslyProcessed;
         long offset = rec.offset();
         if (incompleteOffsets.contains(offset)) {
-            // record previously saved as having not been processed, can exit early
+            // record previously saved as not being completed, can exit early
             previouslyProcessed = false;
         } else {
             Long offsetHighWaterMark = offsetHighestSeen;

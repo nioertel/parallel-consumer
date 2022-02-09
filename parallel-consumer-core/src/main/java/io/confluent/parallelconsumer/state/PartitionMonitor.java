@@ -11,7 +11,6 @@ import io.confluent.parallelconsumer.offsets.OffsetMapCodecManager;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -22,10 +21,9 @@ import pl.tlinkowski.unij.api.UniSets;
 
 import java.util.*;
 
-import static io.confluent.csid.utils.KafkaUtils.toTP;
+import static io.confluent.csid.utils.KafkaUtils.toTopicPartition;
 import static io.confluent.csid.utils.StringUtils.msg;
 import static io.confluent.parallelconsumer.offsets.OffsetMapCodecManager.DefaultMaxMetadataSize;
-import static lombok.AccessLevel.PACKAGE;
 
 /**
  * In charge of managing {@link PartitionState}s.
@@ -51,7 +49,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     /**
      * Hold the tracking state for each of our managed partitions.
      */
-    @Getter(PACKAGE)
+//    @Getter(PACKAGE)
     private final Map<TopicPartition, PartitionState<K, V>> partitionStates = new HashMap<>();
 
     /**
@@ -63,14 +61,13 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
      */
     private final Map<TopicPartition, Integer> partitionsAssignmentEpochs = new HashMap<>();
 
-    @SneakyThrows
-    public PartitionState<K, V> getState(TopicPartition tp) {
+    public Optional<PartitionState<K, V>> getPartitionState(TopicPartition tp) {
         // may cause the system to wait for a rebalance to finish
         PartitionState<K, V> kvPartitionState;
         synchronized (partitionStates) {
             kvPartitionState = partitionStates.get(tp);
         }
-        return kvPartitionState;
+        return Optional.of(kvPartitionState);
     }
 
     /**
@@ -152,7 +149,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     public void onOffsetCommitSuccess(Map<TopicPartition, OffsetAndMetadata> offsetsToSend) {
         // partitionOffsetHighWaterMarks this will get overwritten in due course
         offsetsToSend.forEach((tp, meta) -> {
-            var partition = getState(tp);
+            var partition = getPartitionState(tp);
             partition.onOffsetCommitSuccess(meta);
         });
     }
@@ -171,18 +168,8 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         }
     }
 
-    // todo remove tp - derived from rec
-    public int getEpoch(final ConsumerRecord<K, V> rec, final TopicPartition tp) {
-        Integer epoch = partitionsAssignmentEpochs.get(tp);
-        rec.topic();
-        if (epoch == null) {
-            throw new InternalRuntimeError(msg("Received message for a partition which is not assigned: {}", rec));
-        }
-        return epoch;
-    }
-
     public int getEpoch(final ConsumerRecord<K, V> rec) {
-        var tp = toTP(rec);
+        var tp = toTopicPartition(rec);
         Integer epoch = partitionsAssignmentEpochs.get(tp);
         rec.topic();
         if (epoch == null) {
@@ -222,26 +209,29 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         maybeRaiseHighestSeenOffset(wc.getTopicPartition(), wc.offset());
     }
 
-    public void maybeRaiseHighestSeenOffset(TopicPartition tp, long highWater) {
-        getState(tp).maybeRaiseHighestSeenOffset(highWater);
+    public void maybeRaiseHighestSeenOffset(TopicPartition tp, long seenOffset) {
+        getPartitionState(tp).maybeRaiseHighestSeenOffset(seenOffset);
     }
 
-    boolean isRecordPreviouslyProcessed(ConsumerRecord<K, V> rec) {
-        var tp = toTP(rec);
-        var partition = getState(tp);
-        if (partition == null) {
-            // todo delete block - should never get here
+    boolean isRecordPreviouslyCompleted(ConsumerRecord<K, V> rec) {
+        var tp = toTopicPartition(rec);
+
+        // todo get
+        var partitionState = getPartitionState(tp);
+        if (partitionState.isEmpty()) {
+            // todo delete block - should never get here - should not receive records for which we have not registered partition state. Unless, we have received a message in the poll queue for a partition which we have since lost.
             int epoch = getEpoch(rec, tp);
             log.error("No state found for partition {}, presuming message never before been processed. Partition epoch: {}", tp, epoch);
             return false;
+        } else {
+            boolean previouslyCompleted = partitionState.get().isRecordPreviouslyCompleted(rec);
+            log.trace("Record {} previously completed? {}", rec.offset(), previouslyCompleted);
+            return previouslyCompleted;
         }
-        boolean previouslyProcessed = partition.isRecordPreviouslyProcessed(rec);
-        log.trace("Record {} previously seen? {}", rec.offset(), previouslyProcessed);
-        return previouslyProcessed;
     }
 
     public boolean isAllowedMoreRecords(TopicPartition tp) {
-        return getState(tp).isAllowedMoreRecords();
+        return getPartitionState(tp).isAllowedMoreRecords();
     }
 
     public boolean hasWorkInCommitQueues() {
@@ -259,18 +249,18 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     private void setPartitionMoreRecordsAllowedToProcess(TopicPartition topicPartitionKey, boolean moreMessagesAllowed) {
-        var state = getState(topicPartitionKey);
+        var state = getPartitionState(topicPartitionKey);
         state.setAllowedMoreRecords(moreMessagesAllowed);
     }
 
     public Long getHighestSeenOffset(final TopicPartition tp) {
-        return getState(tp).getOffsetHighestSeen();
+        return getPartitionState(tp).getOffsetHighestSeen();
     }
 
     public void addWorkContainer(final WorkContainer<K, V> wc) {
         maybeRaiseHighestSeenOffset(wc);
         var tp = wc.getTopicPartition();
-        NavigableMap<Long, WorkContainer<K, V>> queue = getState(tp).getCommitQueues();
+        NavigableMap<Long, WorkContainer<K, V>> queue = getPartitionState(tp).getCommitQueues();
         queue.put(wc.offset(), wc);
     }
 
@@ -317,7 +307,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
 
             OffsetMapCodecManager<K, V> om = new OffsetMapCodecManager<>(this.consumer);
             try {
-                PartitionState<K, V> state = getState(topicPartitionKey);
+                PartitionState<K, V> state = getPartitionState(topicPartitionKey);
                 // todo smelly - update the partition state with the new found incomplete offsets. This field is used by nested classes accessing the state
                 state.setIncompleteOffsets(incompleteOffsets);
                 String offsetMapPayload = om.makeOffsetMetadataPayload(offsetOfNextExpectedMessage, state);
@@ -360,11 +350,41 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public boolean isPartitionAssigned(ConsumerRecord<K, V> rec) {
-        return (getState(toTP(rec)) != null);
+        return (getPartitionState(toTopicPartition(rec)) != null);
     }
 
     public void onSuccess(WorkContainer<K, V> wc) {
-        getState(wc.getTopicPartition()).onSuccess(wc);
+        getPartitionState(wc.getTopicPartition()).onSuccess(wc);
+    }
+
+
+    /**
+     * Takes a record as work and puts it into internal queues, unless it's been previously recorded as completed as per
+     * loaded records.
+     *
+     * @return true if the record was taken, false if it was skipped (previously successful)
+     */
+    boolean maybeRegisterNewRecordAsWork(final ConsumerRecord<K, V> rec) {
+        if (rec == null) return false;
+
+        if (!isPartitionAssigned(rec)) {
+            log.debug("Record in buffer for a partition no longer assigned. Dropping. TP: {} rec: {}", toTopicPartition(rec), rec);
+            return false;
+        }
+
+        if (isRecordPreviouslyCompleted(rec)) {
+            log.trace("Record previously completed, skipping. offset: {}", rec.offset());
+            return false;
+        } else {
+            int currentPartitionEpoch = getEpoch(rec);
+            var wc = new WorkContainer<>(currentPartitionEpoch, rec);
+
+            sm.addWorkContainer(wc);
+
+            addWorkContainer(wc);
+
+            return true;
+        }
     }
 
 }

@@ -10,7 +10,7 @@ import org.apache.kafka.common.TopicPartition;
 public final class KafkaUtils {
 
     // todo rename
-    public static TopicPartition toTP(ConsumerRecord<?,?> rec) {
+    public static TopicPartition toTopicPartition(ConsumerRecord<?, ?> rec) {
         return new TopicPartition(rec.topic(), rec.partition());
     }
 

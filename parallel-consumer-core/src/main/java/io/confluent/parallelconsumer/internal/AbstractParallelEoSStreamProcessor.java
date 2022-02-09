@@ -659,7 +659,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         //
         if (state == running || state == draining) {
             int delta = calculateQuantityToRequest();
-            var records = wm.maybeGetWork(delta);
+            var records = wm.maybeGetWorkIfAvailable(delta);
 
             gotWorkCount = records.size();
             lastWorkRequestWasFulfilled = gotWorkCount >= delta;

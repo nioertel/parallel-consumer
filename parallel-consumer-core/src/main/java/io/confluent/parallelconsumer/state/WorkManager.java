@@ -28,7 +28,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static io.confluent.csid.utils.BackportUtils.toSeconds;
-import static io.confluent.csid.utils.KafkaUtils.toTP;
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.UNORDERED;
 import static lombok.AccessLevel.PACKAGE;
 import static lombok.AccessLevel.PUBLIC;
@@ -158,6 +157,8 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
     }
 
     /**
+     * Moves the requested amount of work from initial queues into work queues, if available.
+     *
      * @param requestedMaxWorkToRetrieve try to move at least this many messages into the inbound queues
      */
     private void ingestPolledRecordsIntoQueues(final int requestedMaxWorkToRetrieve) {
@@ -165,66 +166,34 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                 requestedMaxWorkToRetrieve, wmbm.internalFlattenedMailQueueSize());
 
         //
-        var taken = 0;
-        @SuppressWarnings("BooleanVariableAlwaysNegated")
-        boolean stillProcessing;
+        var takenWorkCount = 0;
+        boolean continueIngesting;
         do {
-            ConsumerRecord<K, V> poll = wmbm.internalFlattenedMailQueuePoll();
-            boolean takenAsWork = maybeRegisterNewRecordAsWork(poll);
-            if (takenAsWork) {
-                taken++;
+            ConsumerRecord<K, V> polledRecord = wmbm.internalFlattenedMailQueuePoll();
+            boolean recordAddedAsWork = pm.maybeRegisterNewRecordAsWork(polledRecord);
+            if (recordAddedAsWork) {
+                takenWorkCount++;
             }
-            stillProcessing = taken < requestedMaxWorkToRetrieve && poll != null;
-        } while (stillProcessing);
+            boolean polledQueueNotExhausted = polledRecord != null;
+            boolean ingestTargetNotSatisfied = takenWorkCount < requestedMaxWorkToRetrieve;
+            continueIngesting = ingestTargetNotSatisfied && polledQueueNotExhausted;
+        } while (continueIngesting);
 
-        log.debug("{} new records were registered.", taken);
-    }
-
-    /**
-     * Takes a record as work and puts it into internal queues, unless it's been previously as completed as per loaded
-     * records.
-     *
-     * @return true if the record was taken, false if it was skipped (previously successful)
-     */
-    // todo rename to maybeTakeRecord
-    // todo move to PM, if returns true, sm.addWorkContainer
-    private boolean maybeRegisterNewRecordAsWork(final ConsumerRecord<K, V> rec) {
-        if (rec == null) return false;
-
-        if (!pm.isPartitionAssigned(rec)) {
-            log.debug("Record in buffer for a partition no longer assigned. Dropping. TP: {} rec: {}", toTP(rec), rec);
-            return false;
-        }
-
-        if (pm.isRecordPreviouslyProcessed(rec)) {
-            log.trace("Record previously processed, skipping. offset: {}", rec.offset());
-            return false;
-        } else {
-            TopicPartition tp = toTP(rec);
-
-            int currentPartitionEpoch = pm.getEpoch(rec, tp);
-            var wc = new WorkContainer<>(currentPartitionEpoch, rec);
-
-            sm.addWorkContainer(wc);
-
-            pm.addWorkContainer(wc);
-
-            return true;
-        }
+        log.debug("{} new records were registered.", takenWorkCount);
     }
 
     /**
      * Get work with no limit on quantity, useful for testing.
      */
-    public <R> List<WorkContainer<K, V>> maybeGetWork() {
-        return maybeGetWork(Integer.MAX_VALUE);
+    public <R> List<WorkContainer<K, V>> maybeGetWorkIfAvailable() {
+        return maybeGetWorkIfAvailable(Integer.MAX_VALUE);
     }
 
     /**
      * Depth first work retrieval.
      */
     // todo refactor
-    public List<WorkContainer<K, V>> maybeGetWork(int requestedMaxWorkToRetrieve) {
+    public List<WorkContainer<K, V>> maybeGetWorkIfAvailable(int requestedMaxWorkToRetrieve) {
         int workToGetDelta = requestedMaxWorkToRetrieve;
 
         // optimise early
@@ -232,7 +201,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
             return UniLists.of();
         }
 
-        tryToEnsureAvailableCapacity(requestedMaxWorkToRetrieve);
+        tryToEnsureQuantityOfWorkQueuedAvailable(requestedMaxWorkToRetrieve);
 
         //
         List<WorkContainer<K, V>> work = new ArrayList<>();
@@ -286,7 +255,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                 // and may in fact be the message holding up the partition so must be retried, in which case we don't want to skip it.
                 // Generally speaking, completing more offsets below the highest succeeded (and thus the set represented in the encoded payload),
                 // should usually reduce the payload size requirements
-                boolean representedInEncodedPayloadAlready = workContainer.offset() < pm.getState(topicPartition).getOffsetHighestSucceeded();
+                boolean representedInEncodedPayloadAlready = workContainer.offset() < pm.getPartitionState(topicPartition).getOffsetHighestSucceeded();
                 if (notAllowedMoreRecords && !representedInEncodedPayloadAlready && workContainer.isNotInFlight()) {
                     log.debug("Not allowed more records for the partition ({}) as set from previous encode run (blocked), that this " +
                                     "record ({}) belongs to due to offset encoding back pressure, is within the encoded payload already (offset lower than highest succeeded, " +
@@ -351,7 +320,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
      * Tries to ensure there are at least this many records available in the queues
      */
     // todo rename - shunt messages from internal buffer into queues
-    private void tryToEnsureAvailableCapacity(final int requestedMaxWorkToRetrieve) {
+    private void tryToEnsureQuantityOfWorkQueuedAvailable(final int requestedMaxWorkToRetrieve) {
         // todo this counts all partitions as a whole - this may cause some partitions to starve. need to round robin it?
         int available = sm.getWorkQueuedInShardsCount();
         int extraNeededFromInboxToSatisfy = requestedMaxWorkToRetrieve - available;

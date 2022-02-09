@@ -18,6 +18,9 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import static io.confluent.csid.utils.StringUtils.msg;
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.KEY;
 
+/**
+ * TODO
+ */
 @Slf4j
 @RequiredArgsConstructor
 public class ShardManager<K, V> {
@@ -33,7 +36,7 @@ public class ShardManager<K, V> {
      * Used to collate together a queue of work units for each unique key consumed
      *
      * @see K
-     * @see WorkManager#maybeGetWork()
+     * @see WorkManager#maybeGetWorkIfAvailable()
      */
     // todo performance: disable/remove if using partition order
     private final Map<Object, NavigableMap<Long, WorkContainer<K, V>>> processingShards = new HashMap<>();

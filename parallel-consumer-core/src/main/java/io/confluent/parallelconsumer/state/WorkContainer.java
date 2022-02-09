@@ -22,7 +22,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Future;
 
-import static io.confluent.csid.utils.KafkaUtils.toTP;
+import static io.confluent.csid.utils.KafkaUtils.toTopicPartition;
 
 @Slf4j
 @EqualsAndHashCode
@@ -161,7 +161,7 @@ public class WorkContainer<K, V> implements Comparable<WorkContainer> {
     }
 
     public TopicPartition getTopicPartition() {
-        return toTP(getCr());
+        return toTopicPartition(getCr());
     }
 
     public void onUserFunctionSuccess() {
@@ -184,7 +184,7 @@ public class WorkContainer<K, V> implements Comparable<WorkContainer> {
     @Override
     public String toString() {
 //        return "WorkContainer(" + toTP(cr) + ":" + cr.offset() + ":" + cr.key() + ":" + cr.value() + ")";
-        return "WorkContainer(" + toTP(cr) + ":" + cr.offset() + ":" + cr.key() + ")";
+        return "WorkContainer(" + toTopicPartition(cr) + ":" + cr.offset() + ":" + cr.key() + ")";
     }
 
     public Duration getTimeInFlight() {

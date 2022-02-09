@@ -16,7 +16,7 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import static io.confluent.csid.utils.KafkaUtils.toTP;
+import static io.confluent.csid.utils.KafkaUtils.toTopicPartition;
 
 /**
  * Handles the incoming mail for {@link WorkManager}.
@@ -112,7 +112,7 @@ public class WorkMailBoxManager<K, V> {
         log.debug("Removing stale work from inbox queues");
         flattenBatchQueue();
         internalFlattenedMailQueue.removeIf(rec ->
-                removedPartitions.contains(toTP(rec))
+                removedPartitions.contains(toTopicPartition(rec))
         );
     }
 
