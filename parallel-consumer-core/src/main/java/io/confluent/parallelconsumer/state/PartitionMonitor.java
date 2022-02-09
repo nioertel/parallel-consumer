@@ -17,9 +17,11 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import pl.tlinkowski.unij.api.UniMaps;
 import pl.tlinkowski.unij.api.UniSets;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.confluent.csid.utils.KafkaUtils.toTopicPartition;
 import static io.confluent.csid.utils.StringUtils.msg;
@@ -60,6 +62,14 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
      * Starts at zero.
      */
     private final Map<TopicPartition, Integer> partitionsAssignmentEpochs = new HashMap<>();
+
+    /**
+     * Get's set to true whenever work is returned completed, so that we know when a commit needs to be made.
+     * <p>
+     * In normal operation, this probably makes very little difference, as typical commit frequency is 1 second, so low
+     * chances no work has completed in the last second.
+     */
+    private final AtomicBoolean workStateIsDirtyNeedsCommitting = new AtomicBoolean(false);
 
     public Optional<PartitionState<K, V>> getPartitionState(TopicPartition tp) {
         // may cause the system to wait for a rebalance to finish
@@ -150,7 +160,9 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         // partitionOffsetHighWaterMarks this will get overwritten in due course
         offsetsToSend.forEach((tp, meta) -> {
             var partition = getPartitionState(tp);
-            partition.onOffsetCommitSuccess(meta);
+            partition.ifPresentOrElse(kvPartitionState -> kvPartitionState.onOffsetCommitSuccess(meta), () -> {
+                log.error("onOffsetCommitSuccess event for revoked partition");
+            });
         });
     }
 
@@ -210,17 +222,19 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public void maybeRaiseHighestSeenOffset(TopicPartition tp, long seenOffset) {
-        getPartitionState(tp).maybeRaiseHighestSeenOffset(seenOffset);
+        Optional<PartitionState<K, V>> partitionState = getPartitionState(tp);
+        partitionState.ifPresentOrElse(kvPartitionState -> kvPartitionState.maybeRaiseHighestSeenOffset(seenOffset), () -> {
+            log.debug("Dropping offset raise {} for removed partition {}", seenOffset, tp);
+        });
     }
 
     boolean isRecordPreviouslyCompleted(ConsumerRecord<K, V> rec) {
         var tp = toTopicPartition(rec);
 
-        // todo get
         var partitionState = getPartitionState(tp);
         if (partitionState.isEmpty()) {
             // todo delete block - should never get here - should not receive records for which we have not registered partition state. Unless, we have received a message in the poll queue for a partition which we have since lost.
-            int epoch = getEpoch(rec, tp);
+            int epoch = getEpoch(rec);
             log.error("No state found for partition {}, presuming message never before been processed. Partition epoch: {}", tp, epoch);
             return false;
         } else {
@@ -231,7 +245,10 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public boolean isAllowedMoreRecords(TopicPartition tp) {
-        return getPartitionState(tp).isAllowedMoreRecords();
+        Optional<PartitionState<K, V>> partitionState = getPartitionState(tp);
+        return partitionState.map(PartitionState::isAllowedMoreRecords)
+                // shouldn't reach this state, as doesn't make sesne, but block anyway
+                .orElse(false);
     }
 
     public boolean hasWorkInCommitQueues() {
@@ -350,13 +367,18 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public boolean isPartitionAssigned(ConsumerRecord<K, V> rec) {
-        return (getPartitionState(toTopicPartition(rec)) != null);
+        Optional<PartitionState<K, V>> partitionState = getPartitionState(toTopicPartition(rec));
+        return partitionState.isPresent();
     }
 
     public void onSuccess(WorkContainer<K, V> wc) {
-        getPartitionState(wc.getTopicPartition()).onSuccess(wc);
+        Optional<PartitionState<K, V>> partitionState = getPartitionState(wc.getTopicPartition());
+        if (partitionState.isPresent()) {
+            partitionState.get().onSuccess(wc);
+        } else {
+            log.debug("Dropping completed work container for partition no longer assigned. WC: {}", wc);
+        }
     }
-
 
     /**
      * Takes a record as work and puts it into internal queues, unless it's been previously recorded as completed as per
@@ -385,6 +407,124 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
 
             return true;
         }
+    }
+
+    // todo rename
+    public Map<TopicPartition, OffsetAndMetadata> findCompletedEligibleOffsetsAndRemove() {
+        return findCompletedEligibleOffsetsAndRemove(true);
+    }
+
+    /**
+     * TODO: This entire loop could be possibly redundant, if we instead track low water mark, and incomplete offsets as
+     * work is submitted and returned.
+     * <p>
+     * todo: refactor into smaller methods?
+     * <p>
+     * todo docs
+     * <p>
+     * Finds eligible offset positions to commit in each assigned partition
+     */
+    // todo move to PartitionMonitor / PartitionState
+    // todo rename
+    // todo remove completely as state of offsets should be tracked live, no need to scan for them
+    <R> Map<TopicPartition, OffsetAndMetadata> findCompletedEligibleOffsetsAndRemove(boolean remove) {
+
+        //
+        if (!isDirty()) {
+            // nothing to commit
+            return UniMaps.of();
+        }
+
+        //
+        Map<TopicPartition, OffsetAndMetadata> offsetsToSend = new HashMap<>();
+        int count = 0;
+        int removed = 0;
+        log.trace("Scanning for in order in-flight work that has completed...");
+
+        //
+        Set<Map.Entry<TopicPartition, PartitionState<K, V>>> set = this.partitionStates.entrySet();
+        for (final Map.Entry<TopicPartition, PartitionState<K, V>> partitionStateEntry : set) {
+            var partitionState = partitionStateEntry.getValue();
+            Map<Long, WorkContainer<K, V>> partitionQueue = partitionState.getCommitQueues();
+            TopicPartition topicPartitionKey = partitionStateEntry.getKey();
+            log.trace("Starting scan of partition: {}", topicPartitionKey);
+
+            count += partitionQueue.size();
+            var workToRemove = new LinkedList<WorkContainer<K, V>>();
+            var incompleteOffsets = new LinkedHashSet<Long>();
+            long lowWaterMark = -1;
+            var highestSucceeded = partitionState.getOffsetHighestSucceeded();
+            // can't commit this offset or beyond, as this is the latest offset that is incomplete
+            // i.e. only commit offsets that come before the current one, and stop looking for more
+            boolean beyondSuccessiveSucceededOffsets = false;
+            for (final var offsetAndItsWorkContainer : partitionQueue.entrySet()) {
+                // ordered iteration via offset keys thanks to the tree-map
+                WorkContainer<K, V> container = offsetAndItsWorkContainer.getValue();
+
+                //
+                long offset = container.getCr().offset();
+                if (offset > highestSucceeded) {
+                    break; // no more to encode
+                }
+
+                //
+                boolean complete = container.isUserFunctionComplete();
+                if (complete) {
+                    if (container.getUserFunctionSucceeded().get() && !beyondSuccessiveSucceededOffsets) {
+                        log.trace("Found offset candidate ({}) to add to offset commit map", container);
+                        workToRemove.add(container);
+                        // as in flights are processed in order, this will keep getting overwritten with the highest offset available
+                        // current offset is the highest successful offset, so commit +1 - offset to be committed is defined as the offset of the next expected message to be read
+                        long offsetOfNextExpectedMessageToBeCommitted = offset + 1;
+                        OffsetAndMetadata offsetData = new OffsetAndMetadata(offsetOfNextExpectedMessageToBeCommitted);
+                        offsetsToSend.put(topicPartitionKey, offsetData);
+                    } else if (container.getUserFunctionSucceeded().get() && beyondSuccessiveSucceededOffsets) {
+                        // todo lookup the low water mark and include here
+                        log.trace("Offset {} is complete and succeeded, but we've iterated past the lowest committable offset ({}). Will mark as complete in the offset map.",
+                                container.getCr().offset(), lowWaterMark);
+                        // no-op - offset map is only for not succeeded or completed offsets
+                    } else {
+                        log.trace("Offset {} is complete, but failed processing. Will track in offset map as failed. Can't do normal offset commit past this point.", container.getCr().offset());
+                        beyondSuccessiveSucceededOffsets = true;
+                        incompleteOffsets.add(offset);
+                    }
+                } else {
+                    lowWaterMark = container.offset();
+                    beyondSuccessiveSucceededOffsets = true;
+                    log.trace("Offset ({}) is incomplete, holding up the queue ({}) of size {}.",
+                            container.getCr().offset(),
+                            topicPartitionKey,
+                            partitionQueue.size());
+                    incompleteOffsets.add(offset);
+                }
+            }
+
+            addEncodedOffsets(offsetsToSend, topicPartitionKey, incompleteOffsets);
+
+            if (remove) {
+                removed += workToRemove.size();
+                for (var workContainer : workToRemove) {
+                    var offset = workContainer.getCr().offset();
+                    partitionQueue.remove(offset);
+                }
+            }
+        }
+
+        log.debug("Scan finished, {} were in flight, {} completed offsets removed, coalesced to {} offset(s) ({}) to be committed",
+                count, removed, offsetsToSend.size(), offsetsToSend);
+        return offsetsToSend;
+    }
+
+    public void setDirty() {
+        workStateIsDirtyNeedsCommitting.set(true);
+    }
+
+    boolean isDirty() {
+        return workStateIsDirtyNeedsCommitting.get();
+    }
+
+    public boolean isClean() {
+        return !isDirty();
     }
 
 }
