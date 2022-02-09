@@ -245,20 +245,21 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                 // and may in fact be the message holding up the partition so must be retried, in which case we don't want to skip it.
                 // Generally speaking, completing more offsets below the highest succeeded (and thus the set represented in the encoded payload),
                 // should usually reduce the payload size requirements
-                Optional<PartitionState<K, V>> partitionState = pm.getPartitionState(topicPartition);
-                if (partitionState.isEmpty()) {
-                    // this state should never happen, as work should get removed from shards upon partition revocation
-                    log.debug("Dropping work container for partition no longer assigned. WC: {}", workContainer);
-                } else {
-                    boolean representedInEncodedPayloadAlready = workContainer.offset() < partitionState.get().getOffsetHighestSucceeded();
-                    if (notAllowedMoreRecords && !representedInEncodedPayloadAlready && workContainer.isNotInFlight()) {
-                        log.debug("Not allowed more records for the partition ({}) as set from previous encode run (blocked), that this " +
-                                        "record ({}) belongs to due to offset encoding back pressure, is within the encoded payload already (offset lower than highest succeeded, " +
-                                        "not in flight ({}), continuing on to next container in shard.",
-                                topicPartition, workContainer.offset(), workContainer.isNotInFlight());
-                        continue;
-                    }
+//                Optional<PartitionState<K, V>> partitionState = pm.getPartitionState(topicPartition);
+                PartitionState<K, V> partitionState = pm.getPartitionState(topicPartition);
+//                if (partitionState.isEmpty()) {
+//                    // this state should never happen, as work should get removed from shards upon partition revocation
+//                    log.debug("Dropping work container for partition no longer assigned. WC: {}", workContainer);
+//                } else {
+                boolean representedInEncodedPayloadAlready = workContainer.offset() < partitionState.getOffsetHighestSucceeded();
+                if (notAllowedMoreRecords && !representedInEncodedPayloadAlready && workContainer.isNotInFlight()) {
+                    log.debug("Not allowed more records for the partition ({}) as set from previous encode run (blocked), that this " +
+                                    "record ({}) belongs to due to offset encoding back pressure, is within the encoded payload already (offset lower than highest succeeded, " +
+                                    "not in flight ({}), continuing on to next container in shard.",
+                            topicPartition, workContainer.offset(), workContainer.isNotInFlight());
+                    continue;
                 }
+//                }
 
                 // check if work can be taken
                 boolean hasNotSucceededAlready = !workContainer.isUserFunctionSucceeded();
