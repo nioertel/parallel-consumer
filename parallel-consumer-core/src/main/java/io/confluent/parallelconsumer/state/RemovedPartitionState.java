@@ -1,12 +1,16 @@
 package io.confluent.parallelconsumer.state;
 
+/*-
+ * Copyright (C) 2020-2022 Confluent, Inc.
+ */
+
 import io.confluent.csid.utils.KafkaUtils;
 import io.confluent.parallelconsumer.offsets.OffsetMapCodecManager;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.TopicPartition;
 
+import java.util.HashSet;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -20,13 +24,20 @@ import java.util.concurrent.ConcurrentSkipListMap;
 @Slf4j
 public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
 
-    public static final ConcurrentSkipListMap EMPTY_MAP = new ConcurrentSkipListMap<>();
+    // todo warnings
+    private static final ConcurrentSkipListMap EMPTY_MAP = new ConcurrentSkipListMap<>();
+    private static final HashSet<Long> EMPTY_SET = new HashSet<>();
 
     // todo can set instance generics in a static context?
-    private static PartitionState singleton;
+    private static final PartitionState singleton = new RemovedPartitionState();
 
-    public RemovedPartitionState(final TopicPartition tp, final OffsetMapCodecManager.HighestOffsetAndIncompletes incompletes) {
-        super(tp, incompletes);
+//    public RemovedPartitionState(final TopicPartition tp, final OffsetMapCodecManager.HighestOffsetAndIncompletes incompletes) {
+//        super(tp, incompletes);
+//        throw new IllegalStateException();
+//    }
+
+    public RemovedPartitionState() {
+        super(null, OffsetMapCodecManager.HighestOffsetAndIncompletes.of());
     }
 
     public static PartitionState getSingleton() {
@@ -42,7 +53,7 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     @Override
     public Set<Long> getIncompleteOffsets() {
         log.debug("no-op");
-        return Set.of();
+        return EMPTY_SET;
     }
 
     @Override
