@@ -1,9 +1,8 @@
 package io.confluent.parallelconsumer.state;
 
 /*-
- * Copyright (C) 2020-2021 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
-
 import io.confluent.parallelconsumer.internal.BrokerPollSystem;
 import io.confluent.parallelconsumer.internal.CountingCRLinkedList;
 import lombok.extern.slf4j.Slf4j;

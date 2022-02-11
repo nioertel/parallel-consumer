@@ -1,7 +1,7 @@
 package io.confluent.parallelconsumer.state;
 
 /*-
- * Copyright (C) 2020-2021 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
 
 import io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor;
@@ -172,7 +172,8 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         for (TopicPartition tp : partitions) {
             // by replacing with a no op implementation, we protect for stale messages still in queues which reference it
             // however it means the map will only grow, but only it's key set
-            var partition = this.partitionStates.remove(tp);
+//            var partition = this.partitionStates.remove(tp);
+            var partition = this.partitionStates.get(tp);
             partitionStates.put(tp, RemovedPartitionState.getSingleton());
 
             //
@@ -265,9 +266,14 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public long getNumberOfEntriesInPartitionQueues() {
-        return partitionStates.values().stream()
+        Collection<PartitionState<K, V>> values = partitionStates.values();
+        return values.stream()
                 .mapToLong(PartitionState::getCommitQueueSize)
-                .reduce(Long::sum).orElse(0);
+                .reduce((left, right) -> {
+                    log.debug("{} {}", left, right);
+                    return left + right;
+                })
+                .orElse(0);
     }
 
     private void setPartitionMoreRecordsAllowedToProcess(TopicPartition topicPartitionKey, boolean moreMessagesAllowed) {
