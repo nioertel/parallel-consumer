@@ -3,23 +3,36 @@ package io.confluent.parallelconsumer.state;
 /*-
  * Copyright (C) 2020-2022 Confluent, Inc.
  */
+
 import io.confluent.csid.utils.LoopingResumingIterator;
 import io.confluent.parallelconsumer.ParallelConsumerOptions;
+import io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor;
+import io.confluent.parallelconsumer.internal.BrokerPollSystem;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.jcip.annotations.ThreadSafe;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 import static io.confluent.csid.utils.StringUtils.msg;
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.KEY;
 
 /**
- * TODO
+ * TODO docs
+ * <p>
+ * This state is shared between the {@link BrokerPollSystem} thread (write - adding and removing shards and work)  and the
+ * {@link AbstractParallelEoSStreamProcessor} Controller thread (read - how many records are in the shards?), so must be thread safe.
  */
+@ThreadSafe
 @Slf4j
 @RequiredArgsConstructor
 public class ShardManager<K, V> {
@@ -38,18 +51,15 @@ public class ShardManager<K, V> {
      * @see WorkManager#maybeGetWorkIfAvailable()
      */
     // todo performance: disable/remove if using partition order
-    private final Map<Object, NavigableMap<Long, WorkContainer<K, V>>> processingShards = new HashMap<>();
-
-    private Map<Object, NavigableMap<Long, WorkContainer<K, V>>> getShards() {
-        return processingShards;
-    }
+    @Getter(AccessLevel.PRIVATE)
+    private final Map<Object, NavigableMap<Long, WorkContainer<K, V>>> processingShards = new ConcurrentHashMap<>();
 
     NavigableMap<Long, WorkContainer<K, V>> getShard(Object key) {
         return processingShards.get(key);
     }
 
     LoopingResumingIterator<Object, NavigableMap<Long, WorkContainer<K, V>>> getIterator(final Optional<Object> iterationResumePoint) {
-        return new LoopingResumingIterator<>(iterationResumePoint, getShards());
+        return new LoopingResumingIterator<>(iterationResumePoint, getProcessingShards());
     }
 
     Object computeShardKey(ConsumerRecord<K, V> rec) {
@@ -71,11 +81,9 @@ public class ShardManager<K, V> {
      * @return Work ready in the processing shards, awaiting selection as work to do
      */
     public int getWorkQueuedInShardsCount() {
-        int count = 0;
-        for (var e : this.processingShards.entrySet()) {
-            count += e.getValue().size();
-        }
-        return count;
+        return getProcessingShards().values().stream()
+                .mapToInt(Map::size)
+                .sum();
     }
 
     public boolean workIsWaitingToBeProcessed() {
@@ -103,7 +111,7 @@ public class ShardManager<K, V> {
     void removeWorkFromShard(final WorkContainer<K, V> work) {
         Object shardKey = computeShardKey(work.getCr());
         log.debug("Removing expired work {} for shard key: {}", work, shardKey);
-        this.processingShards.remove(shardKey);
+        getProcessingShards().remove(shardKey);
     }
 
     public void addWorkContainer(final WorkContainer<K, V> wc) {
@@ -116,7 +124,7 @@ public class ShardManager<K, V> {
     }
 
     void removeShard(final Object key) {
-        getShards().remove(key);
+        getProcessingShards().remove(key);
     }
 
     public void onSuccess(ConsumerRecord<K, V> cr) {

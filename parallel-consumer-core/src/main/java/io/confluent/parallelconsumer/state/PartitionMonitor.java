@@ -5,6 +5,7 @@ package io.confluent.parallelconsumer.state;
  */
 
 import io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor;
+import io.confluent.parallelconsumer.internal.BrokerPollSystem;
 import io.confluent.parallelconsumer.internal.InternalRuntimeError;
 import io.confluent.parallelconsumer.offsets.EncodingNotSupportedException;
 import io.confluent.parallelconsumer.offsets.OffsetMapCodecManager;
@@ -21,6 +22,7 @@ import pl.tlinkowski.unij.api.UniMaps;
 import pl.tlinkowski.unij.api.UniSets;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.confluent.csid.utils.KafkaUtils.toTopicPartition;
@@ -29,6 +31,9 @@ import static io.confluent.parallelconsumer.offsets.OffsetMapCodecManager.Defaul
 
 /**
  * In charge of managing {@link PartitionState}s.
+ * <p>
+ * This state is shared between the {@link BrokerPollSystem} thread and the {@link AbstractParallelEoSStreamProcessor}
+ * Controller thread, so must be thread safe.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -52,7 +57,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
      * Hold the tracking state for each of our managed partitions.
      */
 //    @Getter(PACKAGE)
-    private final Map<TopicPartition, PartitionState<K, V>> partitionStates = new HashMap<>();
+    private final Map<TopicPartition, PartitionState<K, V>> partitionStates = new ConcurrentHashMap<>();
 
     /**
      * Record the generations of partition assignment, for fencing off invalid work.
@@ -61,7 +66,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
      * <p>
      * Starts at zero.
      */
-    private final Map<TopicPartition, Integer> partitionsAssignmentEpochs = new HashMap<>();
+    private final Map<TopicPartition, Integer> partitionsAssignmentEpochs = new ConcurrentHashMap<>();
 
     /**
      * Get's set to true whenever work is returned completed, so that we know when a commit needs to be made.

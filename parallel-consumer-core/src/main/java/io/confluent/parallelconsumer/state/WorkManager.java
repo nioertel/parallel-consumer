@@ -3,11 +3,13 @@ package io.confluent.parallelconsumer.state;
 /*-
  * Copyright (C) 2020-2022 Confluent, Inc.
  */
+
 import io.confluent.csid.utils.LoopingResumingIterator;
 import io.confluent.csid.utils.WallClock;
 import io.confluent.parallelconsumer.ParallelConsumerOptions;
 import io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder;
 import io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor;
+import io.confluent.parallelconsumer.internal.BrokerPollSystem;
 import io.confluent.parallelconsumer.internal.DynamicLoadFactor;
 import io.confluent.parallelconsumer.internal.RateLimiter;
 import lombok.Getter;
@@ -38,6 +40,9 @@ import static lombok.AccessLevel.PUBLIC;
  * High Water Mark - the highest offset which has succeeded (previous may be incomplete)
  * <p>
  * Highest seen offset - the highest ever seen offset
+ * <p>
+ * This state is shared between the {@link BrokerPollSystem} thread and the {@link AbstractParallelEoSStreamProcessor}
+ * Controller thread, so must be thread safe.
  *
  * @param <K>
  * @param <V>
@@ -49,6 +54,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
     private final ParallelConsumerOptions options;
 
     // todo rename PSM, PartitionStateManager
+    // todo make private
     @Getter(PUBLIC)
     final PartitionMonitor<K, V> pm;
 
