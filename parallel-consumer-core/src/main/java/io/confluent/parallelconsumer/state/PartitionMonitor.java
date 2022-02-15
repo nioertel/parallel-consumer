@@ -274,10 +274,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         Collection<PartitionState<K, V>> values = partitionStates.values();
         return values.stream()
                 .mapToLong(PartitionState::getCommitQueueSize)
-                .reduce((left, right) -> {
-                    log.debug("{} {}", left, right);
-                    return left + right;
-                })
+                .reduce(Long::sum)
                 .orElse(0);
     }
 
