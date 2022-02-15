@@ -382,7 +382,8 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     public boolean isPartitionAssigned(ConsumerRecord<K, V> rec) {
 //        Optional<PartitionState<K, V>> partitionState = getPartitionState(toTopicPartition(rec));
         PartitionState<K, V> partitionState = getPartitionState(toTopicPartition(rec));
-        return partitionState != null;
+        // TODO check
+        return partitionState != null && partitionState.getClass().isAssignableFrom(RemovedPartitionState.class);
     }
 
     public void onSuccess(WorkContainer<K, V> wc) {
