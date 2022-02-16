@@ -6,6 +6,7 @@ package io.confluent.parallelconsumer.state;
 
 import io.confluent.csid.utils.LoopingResumingIterator;
 import io.confluent.parallelconsumer.ParallelConsumerOptions;
+import io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder;
 import io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor;
 import io.confluent.parallelconsumer.internal.BrokerPollSystem;
 import lombok.Getter;
@@ -24,10 +25,13 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.KEY;
 
 /**
- * TODO docs
+ * Shards are local queues of work to be processed.
  * <p>
- * This state is shared between the {@link BrokerPollSystem} thread (write - adding and removing shards and work)  and the
- * {@link AbstractParallelEoSStreamProcessor} Controller thread (read - how many records are in the shards?), so must be thread safe.
+ * Generally they are keyed by one of the corresponding {@link ProcessingOrder} modes - key, partition etc...
+ * <p>
+ * This state is shared between the {@link BrokerPollSystem} thread (write - adding and removing shards and work)  and
+ * the {@link AbstractParallelEoSStreamProcessor} Controller thread (read - how many records are in the shards?), so
+ * must be thread safe.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -49,6 +53,11 @@ public class ShardManager<K, V> {
     // todo performance: disable/remove if using partition order
     private final Map<Object, NavigableMap<Long, WorkContainer<K, V>>> processingShards = new ConcurrentHashMap<>();
 
+    /**
+     * The shard belonging to the given key
+     *
+     * @return may return empty if the shard has since been removed
+     */
     Optional<NavigableMap<Long, WorkContainer<K, V>>> getShard(Object key) {
         return Optional.ofNullable(processingShards.get(key));
     }

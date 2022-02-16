@@ -41,8 +41,7 @@ import static lombok.AccessLevel.PUBLIC;
  * <p>
  * Highest seen offset - the highest ever seen offset
  * <p>
- * This state is shared between the {@link BrokerPollSystem} thread and the {@link AbstractParallelEoSStreamProcessor}
- * Controller thread, so must be thread safe.
+ * This state is shared between the {@link BrokerPollSystem} thread and the {@link AbstractParallelEoSStreamProcessor}.
  *
  * @param <K>
  * @param <V>
@@ -250,12 +249,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                 // and may in fact be the message holding up the partition so must be retried, in which case we don't want to skip it.
                 // Generally speaking, completing more offsets below the highest succeeded (and thus the set represented in the encoded payload),
                 // should usually reduce the payload size requirements
-//                Optional<PartitionState<K, V>> partitionState = pm.getPartitionState(topicPartition);
                 PartitionState<K, V> partitionState = pm.getPartitionState(topicPartition);
-//                if (partitionState.isEmpty()) {
-//                    // this state should never happen, as work should get removed from shards upon partition revocation
-//                    log.debug("Dropping work container for partition no longer assigned. WC: {}", workContainer);
-//                } else {
                 boolean representedInEncodedPayloadAlready = workContainer.offset() < partitionState.getOffsetHighestSucceeded();
                 if (notAllowedMoreRecords && !representedInEncodedPayloadAlready && workContainer.isNotInFlight()) {
                     log.debug("Not allowed more records for the partition ({}) as set from previous encode run (blocked), that this " +
@@ -264,7 +258,6 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                             topicPartition, workContainer.offset(), workContainer.isNotInFlight());
                     continue;
                 }
-//                }
 
                 // check if work can be taken
                 boolean hasNotSucceededAlready = !workContainer.isUserFunctionSucceeded();

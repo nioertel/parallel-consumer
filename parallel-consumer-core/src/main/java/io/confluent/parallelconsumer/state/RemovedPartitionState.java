@@ -17,10 +17,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
- * No op version of {@link PartitionState} used for when partition assignments are removed
- *
- * @param <K>
- * @param <V>
+ * No op version of {@link PartitionState} used for when partition assignments are removed, to avoid managing null
+ * references.
  */
 @Slf4j
 public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
@@ -28,7 +26,6 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     private static final NavigableMap READ_ONLY_EMPTY_MAP = Collections.unmodifiableNavigableMap(new ConcurrentSkipListMap<>());
     private static final Set READ_ONLY_EMPTY_SET = Collections.unmodifiableSet(new HashSet<>());
 
-    // todo can set instance generics in a static context?
     private static final PartitionState singleton = new RemovedPartitionState();
 
     public RemovedPartitionState() {
@@ -48,7 +45,6 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     @Override
     public Set<Long> getIncompleteOffsets() {
         log.debug("no-op");
-        // todo remove state access - invert
         //noinspection unchecked - by using unsave generics, we are able to share one static instance
         return READ_ONLY_EMPTY_SET;
     }
@@ -68,7 +64,6 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     @Override
     NavigableMap<Long, WorkContainer<K, V>> getCommitQueues() {
         log.debug("no-op");
-        // todo remove state access - invert
         //noinspection unchecked - by using unsave generics, we are able to share one static instance
         return READ_ONLY_EMPTY_MAP;
     }

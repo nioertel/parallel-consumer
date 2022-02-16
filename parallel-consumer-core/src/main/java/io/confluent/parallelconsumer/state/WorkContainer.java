@@ -182,7 +182,6 @@ public class WorkContainer<K, V> implements Comparable<WorkContainer> {
 
     @Override
     public String toString() {
-//        return "WorkContainer(" + toTP(cr) + ":" + cr.offset() + ":" + cr.key() + ":" + cr.value() + ")";
         return "WorkContainer(" + toTopicPartition(cr) + ":" + cr.offset() + ":" + cr.key() + ")";
     }
 
