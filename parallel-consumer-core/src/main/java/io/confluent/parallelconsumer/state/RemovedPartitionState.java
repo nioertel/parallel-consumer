@@ -10,8 +10,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.NavigableMap;
 import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * No op version of {@link PartitionState} used for when partition assignments are removed
@@ -22,17 +25,11 @@ import java.util.Set;
 @Slf4j
 public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
 
-    // todo warnings
-//    private static final ConcurrentSkipListMap EMPTY_MAP = new ConcurrentSkipListMap<>();
-//    private static final HashSet<Long> EMPTY_SET = new HashSet<>();
+    private static final NavigableMap READ_ONLY_EMPTY_MAP = Collections.unmodifiableNavigableMap(new ConcurrentSkipListMap<>());
+    private static final Set READ_ONLY_EMPTY_SET = Collections.unmodifiableSet(new HashSet<>());
 
     // todo can set instance generics in a static context?
     private static final PartitionState singleton = new RemovedPartitionState();
-
-//    public RemovedPartitionState(final TopicPartition tp, final OffsetMapCodecManager.HighestOffsetAndIncompletes incompletes) {
-//        super(tp, incompletes);
-//        throw new IllegalStateException();
-//    }
 
     public RemovedPartitionState() {
         super(null, OffsetMapCodecManager.HighestOffsetAndIncompletes.of());
@@ -52,7 +49,8 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     public Set<Long> getIncompleteOffsets() {
         log.debug("no-op");
         // todo remove state access - invert
-        return EMPTY_SET;
+        //noinspection unchecked - by using unsave generics, we are able to share one static instance
+        return READ_ONLY_EMPTY_SET;
     }
 
     @Override
@@ -71,7 +69,8 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     NavigableMap<Long, WorkContainer<K, V>> getCommitQueues() {
         log.debug("no-op");
         // todo remove state access - invert
-        return EMPTY_MAP;
+        //noinspection unchecked - by using unsave generics, we are able to share one static instance
+        return READ_ONLY_EMPTY_MAP;
     }
 
     @Override
@@ -101,7 +100,7 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
 
     @Override
     public boolean isRecordPreviouslyCompleted(final ConsumerRecord<K, V> rec) {
-        log.debug("Ignoring previously completed request for partition no longer assigned. Partition: {}", KafkaUtils.toTopicPartition(rec));
+        log.trace("Ignoring previously completed request for partition no longer assigned. Partition: {}", KafkaUtils.toTopicPartition(rec));
         return false;
     }
 
@@ -117,6 +116,6 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
 
     @Override
     public void onSuccess(final WorkContainer<K, V> work) {
-        log.debug("Dropping completed work container for partition no longer assigned. WC: {}", work);
+        log.trace("Dropping completed work container for partition no longer assigned. WC: {}", work);
     }
 }

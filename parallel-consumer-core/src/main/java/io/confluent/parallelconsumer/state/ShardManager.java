@@ -23,7 +23,6 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
-import static io.confluent.csid.utils.StringUtils.msg;
 import static io.confluent.parallelconsumer.ParallelConsumerOptions.ProcessingOrder.KEY;
 
 /**
@@ -54,8 +53,8 @@ public class ShardManager<K, V> {
     @Getter(AccessLevel.PRIVATE)
     private final Map<Object, NavigableMap<Long, WorkContainer<K, V>>> processingShards = new ConcurrentHashMap<>();
 
-    NavigableMap<Long, WorkContainer<K, V>> getShard(Object key) {
-        return processingShards.get(key);
+    Optional<NavigableMap<Long, WorkContainer<K, V>>> getShard(Object key) {
+        return Optional.ofNullable(processingShards.get(key));
     }
 
     LoopingResumingIterator<Object, NavigableMap<Long, WorkContainer<K, V>>> getIterator(final Optional<Object> iterationResumePoint) {
@@ -130,17 +129,35 @@ public class ShardManager<K, V> {
     public void onSuccess(ConsumerRecord<K, V> cr) {
         Object key = computeShardKey(cr);
         // remove from processing queues
-        var shard = getShard(key);
-        if (shard == null)
-            throw new NullPointerException(msg("Shard is missing for key {}", key));
-        long offset = cr.offset();
-        shard.remove(offset);
-        // If using KEY ordering, where the shard key is a message key, garbage collect old shard keys (i.e. KEY ordering we may never see a message for this key again)
-        boolean keyOrdering = options.getOrdering().equals(KEY);
-        if (keyOrdering && shard.isEmpty()) {
-            log.trace("Removing empty shard (key: {})", key);
-            removeShard(key);
+        var shardOptional = getShard(key);
+        if (shardOptional.isPresent()) {
+            long offset = cr.offset();
+            var shard = shardOptional.get();
+            shard.remove(offset);
+            // If using KEY ordering, where the shard key is a message key, garbage collect old shard keys (i.e. KEY ordering we may never see a message for this key again)
+            boolean keyOrdering = options.getOrdering().equals(KEY);
+            if (keyOrdering && shard.isEmpty()) {
+                log.trace("Removing empty shard (key: {})", key);
+                removeShard(key);
+            }
+        } else {
+            log.trace("Dropping successful result for revoked partition {}. Record in question was: {}", key, cr);
         }
     }
 
+    /**
+     * Idempotent - work may have not been removed, either way it's put back
+     */
+    public void onFailure(WorkContainer<K, V> wc) {
+        log.debug("Work FAILED, returning to shard");
+        ConsumerRecord<K, V> cr = wc.getCr();
+        Object key = computeShardKey(cr);
+        var shard = getShard(key);
+        if (shard.isPresent()) {
+            long offset = wc.getCr().offset();
+            shard.get().put(offset, wc);
+        } else {
+            log.trace("Dropping failure result for revoked partition {}. Record in question was: {}", key, cr);
+        }
+    }
 }

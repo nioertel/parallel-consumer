@@ -227,11 +227,6 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         return false;
     }
 
-
-    private void maybeRaiseHighestSeenOffset(WorkContainer<K, V> wc) {
-        maybeRaiseHighestSeenOffset(wc.getTopicPartition(), wc.offset());
-    }
-
     public void maybeRaiseHighestSeenOffset(TopicPartition tp, long seenOffset) {
 //        Optional<PartitionState<K, V>> partitionState = getPartitionState(tp);
 //        partitionState.ifPresentOrElse(kvPartitionState -> kvPartitionState.maybeRaiseHighestSeenOffset(seenOffset), () -> {
@@ -288,10 +283,8 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public void addWorkContainer(final WorkContainer<K, V> wc) {
-        maybeRaiseHighestSeenOffset(wc);
         var tp = wc.getTopicPartition();
-        NavigableMap<Long, WorkContainer<K, V>> queue = getPartitionState(tp).getCommitQueues();
-        queue.put(wc.offset(), wc);
+        getPartitionState(tp).addWorkContainer(wc);
     }
 
     /**
@@ -519,10 +512,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
 
             if (remove) {
                 removed += workToRemove.size();
-                for (var workContainer : workToRemove) {
-                    var offset = workContainer.getCr().offset();
-                    partitionQueue.remove(offset);
-                }
+                partitionState.remove(workToRemove);
             }
         }
 

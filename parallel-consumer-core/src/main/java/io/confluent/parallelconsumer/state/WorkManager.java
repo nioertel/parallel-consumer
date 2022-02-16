@@ -332,7 +332,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
         ingestPolledRecordsIntoQueues(extraNeededFromInboxToSatisfy);
     }
 
-    // todo move most to ShardManager
+    // todo move PM or SM?
     public void onSuccess(WorkContainer<K, V> wc) {
         log.trace("Processing success...");
         pm.setDirty();
@@ -362,20 +362,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
         // error occurred, put it back in the queue if it can be retried
         // if not explicitly retriable, put it back in with an try counter so it can be later given up on
         wc.fail(clock);
-        putBack(wc);
-    }
-
-    /**
-     * Idempotent - work may have not been removed, either way it's put back
-     */
-    // todo move to ShardManager
-    private void putBack(WorkContainer<K, V> wc) {
-        log.debug("Work FAILED, returning to shard");
-        ConsumerRecord<K, V> cr = wc.getCr();
-        Object key = sm.computeShardKey(cr);
-        var shard = sm.getShard(key);
-        long offset = wc.getCr().offset();
-        shard.put(offset, wc);
+        sm.onFailure(wc);
         numberRecordsOutForProcessing--;
     }
 

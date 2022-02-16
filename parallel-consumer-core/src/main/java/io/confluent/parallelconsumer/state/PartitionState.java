@@ -3,6 +3,7 @@ package io.confluent.parallelconsumer.state;
 /*-
  * Copyright (C) 2020-2022 Confluent, Inc.
  */
+
 import io.confluent.parallelconsumer.offsets.OffsetMapCodecManager;
 import lombok.Getter;
 import lombok.NonNull;
@@ -12,6 +13,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -42,9 +45,13 @@ public class PartitionState<K, V> {
     // visible for testing
     // todo should be tracked live, as we know when the state of work containers flips - i.e. they are continuously tracked
     // this is derived from partitionCommitQueues WorkContainer states
-    @Getter
-    @Setter // todo remove setter - leaky abstraction, shouldn't be needed
+    // todo remove setter - leaky abstraction, shouldn't be needed
+    @Setter
     private Set<Long> incompleteOffsets;
+
+    public Set<Long> getIncompleteOffsets() {
+        return Collections.unmodifiableSet(incompleteOffsets);
+    }
 
     /**
      * The highest seen offset for a partition.
@@ -91,8 +98,11 @@ public class PartitionState<K, V> {
      *
      * @see #findCompletedEligibleOffsetsAndRemove
      */
-    @Getter(PACKAGE)
     private final NavigableMap<Long, WorkContainer<K, V>> commitQueues = new ConcurrentSkipListMap<>();
+
+    NavigableMap<Long, WorkContainer<K, V>> getCommitQueues() {
+        return Collections.unmodifiableNavigableMap(commitQueues);
+    }
 
     public PartitionState(TopicPartition tp, OffsetMapCodecManager.HighestOffsetAndIncompletes incompletes) {
         this.tp = tp;
@@ -159,6 +169,19 @@ public class PartitionState<K, V> {
         if (thisOffset > highestSucceeded) {
             log.trace("Updating highest completed - was: {} now: {}", highestSucceeded, thisOffset);
             setOffsetHighestSucceeded(thisOffset);
+        }
+    }
+
+    public void addWorkContainer(WorkContainer<K, V> wc) {
+        maybeRaiseHighestSeenOffset(wc.offset());
+        NavigableMap<Long, WorkContainer<K, V>> queue = this.commitQueues;
+        queue.put(wc.offset(), wc);
+    }
+
+    public void remove(LinkedList<WorkContainer<K, V>> workToRemove) {
+        for (var workContainer : workToRemove) {
+            var offset = workContainer.getCr().offset();
+            this.commitQueues.remove(offset);
         }
     }
 
