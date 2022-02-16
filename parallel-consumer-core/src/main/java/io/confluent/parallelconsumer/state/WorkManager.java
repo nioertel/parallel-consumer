@@ -202,7 +202,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
         List<WorkContainer<K, V>> work = new ArrayList<>();
 
         //
-        LoopingResumingIterator<Object, NavigableMap<Long, WorkContainer<K, V>>> it =
+        LoopingResumingIterator<Object, NavigableMap<Long, WorkContainer<K, V>>> workQueueIterator =
                 sm.getIterator(iterationResumePoint);
 
         var staleWorkToRemove = new ArrayList<WorkContainer<K, V>>();
@@ -211,16 +211,16 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
         var slowWorkTopics = new HashSet<String>();
 
         //
-        for (var shard : it) {
-            log.trace("Looking for work on shard: {}", shard.getKey());
+        for (var workQueueShard : workQueueIterator) {
+            log.trace("Looking for work on workQueueShard: {}", workQueueShard.getKey());
             if (work.size() >= workToGetDelta) {
-                this.iterationResumePoint = Optional.of(shard.getKey());
+                this.iterationResumePoint = Optional.of(workQueueShard.getKey());
                 log.debug("Work taken is now over max, stopping (saving iteration resume point {})", iterationResumePoint);
                 break;
             }
 
             ArrayList<WorkContainer<K, V>> shardWork = new ArrayList<>();
-            SortedMap<Long, WorkContainer<K, V>> shardQueue = shard.getValue();
+            SortedMap<Long, WorkContainer<K, V>> shardQueue = workQueueShard.getValue();
 
             // then iterate over shardQueue queue
             Set<Map.Entry<Long, WorkContainer<K, V>>> shardQueueEntries = shardQueue.entrySet();
@@ -235,7 +235,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
 
                 {
                     if (checkEpochIsStale(workContainer)) {
-                        // this state should never happen, as work should get removed from shards upon partition revocation
+                        // this state should never happen, as work should get removed from shards upon partition revocation, although under busy load it might occur (racey)
                         log.debug("Work is in queue with stale epoch. Will remove now. Was it not removed properly on revoke? Or are we in a race state? {}", workContainer);
                         staleWorkToRemove.add(workContainer);
                         continue; // skip
@@ -260,7 +260,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                 if (notAllowedMoreRecords && !representedInEncodedPayloadAlready && workContainer.isNotInFlight()) {
                     log.debug("Not allowed more records for the partition ({}) as set from previous encode run (blocked), that this " +
                                     "record ({}) belongs to due to offset encoding back pressure, is within the encoded payload already (offset lower than highest succeeded, " +
-                                    "not in flight ({}), continuing on to next container in shard.",
+                                    "not in flight ({}), continuing on to next container in workQueueShard.",
                             topicPartition, workContainer.offset(), workContainer.isNotInFlight());
                     continue;
                 }
@@ -293,7 +293,7 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
                 } else {
                     // can't take any more from this partition until this work is finished
                     // processing blocked on this partition, continue to next partition
-                    log.trace("Processing by {}, so have cannot get more messages on this ({}) shard.", this.options.getOrdering(), shard.getKey());
+                    log.trace("Processing by {}, so have cannot get more messages on this ({}) workQueueShard.", this.options.getOrdering(), workQueueShard.getKey());
                     break;
                 }
             }

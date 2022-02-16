@@ -113,7 +113,7 @@ public class OffsetMapCodecManager<K, V> {
             try {
                 lastCommittedOffsets = consumer.committed(assignment);
             } catch (WakeupException exception) {
-                log.warn("Woken up trying to get assignment", exception);
+                log.debug("Woken up trying to get assignment", exception);
                 lastWakeupException = exception;
             }
             attempts++;
