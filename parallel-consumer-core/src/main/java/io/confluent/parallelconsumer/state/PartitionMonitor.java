@@ -77,6 +77,7 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     public PartitionState<K, V> getPartitionState(TopicPartition tp) {
         // may cause the system to wait for a rebalance to finish
         PartitionState<K, V> kvPartitionState;
+        // by locking on partitionState, may cause the system to wait for a rebalance to finish
         synchronized (partitionStates) {
             kvPartitionState = partitionStates.get(tp);
         }

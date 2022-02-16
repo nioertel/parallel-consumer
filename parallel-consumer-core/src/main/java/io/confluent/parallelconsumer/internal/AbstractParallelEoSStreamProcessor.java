@@ -528,17 +528,22 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     }
 
     /**
-     * Supervisor loop for the main loop.
-     *
-     * @see #supervisorLoop(Function, Consumer)
-     */
-    /**
-     * Optioanl ID of this instance. Useful for testing.
+     * Optional ID of this instance. Useful for testing.
      */
     @Setter
     @Getter
     private Optional<String> myId = Optional.empty();
 
+//    public void setMyId(Optional<String> id) {
+//        this.myId = id;
+//        id.ifPresent(s -> MDC.put("PC-ID", s));
+//    }
+
+    /**
+     * Supervisor loop for the main loop.
+     *
+     * @see #supervisorLoop(Function, Consumer)
+     */
     protected <R> void supervisorLoop(Function<ConsumerRecord<K, V>, List<R>> userFunction,
                                       Consumer<R> callback) {
         if (state != State.unused) {
