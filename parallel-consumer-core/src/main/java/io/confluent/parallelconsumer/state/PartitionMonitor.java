@@ -32,8 +32,7 @@ import static io.confluent.parallelconsumer.offsets.OffsetMapCodecManager.Defaul
 /**
  * In charge of managing {@link PartitionState}s.
  * <p>
- * This state is shared between the {@link BrokerPollSystem} thread and the {@link AbstractParallelEoSStreamProcessor}
- * Controller thread, so must be thread safe.
+ * This state is shared between the {@link BrokerPollSystem} thread and the {@link AbstractParallelEoSStreamProcessor}.
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -56,7 +55,6 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     /**
      * Hold the tracking state for each of our managed partitions.
      */
-//    @Getter(PACKAGE)
     private final Map<TopicPartition, PartitionState<K, V>> partitionStates = new ConcurrentHashMap<>();
 
     /**
@@ -82,7 +80,6 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         synchronized (partitionStates) {
             kvPartitionState = partitionStates.get(tp);
         }
-//        return Optional.of(kvPartitionState);
         return kvPartitionState;
     }
 
@@ -166,9 +163,6 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         // partitionOffsetHighWaterMarks this will get overwritten in due course
         offsetsToSend.forEach((tp, meta) -> {
             var partition = getPartitionState(tp);
-//            partition.ifPresentOrElse(kvPartitionState -> kvPartitionState.onOffsetCommitSuccess(meta), () -> {
-//                log.error("onOffsetCommitSuccess event for revoked partition");
-//            });
             partition.onOffsetCommitSuccess(meta);
         });
     }
@@ -177,7 +171,6 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
         for (TopicPartition tp : partitions) {
             // by replacing with a no op implementation, we protect for stale messages still in queues which reference it
             // however it means the map will only grow, but only it's key set
-//            var partition = this.partitionStates.remove(tp);
             var partition = this.partitionStates.get(tp);
             partitionStates.put(tp, RemovedPartitionState.getSingleton());
 
@@ -228,28 +221,16 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public void maybeRaiseHighestSeenOffset(TopicPartition tp, long seenOffset) {
-//        Optional<PartitionState<K, V>> partitionState = getPartitionState(tp);
-//        partitionState.ifPresentOrElse(kvPartitionState -> kvPartitionState.maybeRaiseHighestSeenOffset(seenOffset), () -> {
-//            log.debug("Dropping offset raise {} for removed partition {}", seenOffset, tp);
-//        });
         PartitionState<K, V> partitionState = getPartitionState(tp);
         partitionState.maybeRaiseHighestSeenOffset(seenOffset);
     }
 
     boolean isRecordPreviouslyCompleted(ConsumerRecord<K, V> rec) {
         var tp = toTopicPartition(rec);
-
         var partitionState = getPartitionState(tp);
-//        if (partitionState.isEmpty()) {
-//            // todo delete block - should never get here - should not receive records for which we have not registered partition state. Unless, we have received a message in the poll queue for a partition which we have since lost.
-//            int epoch = getEpoch(rec);
-//            log.error("No state found for partition {}, presuming message never before been processed. Partition epoch: {}", tp, epoch);
-//            return false;
-//        } else {
         boolean previouslyCompleted = partitionState.isRecordPreviouslyCompleted(rec);
         log.trace("Record {} previously completed? {}", rec.offset(), previouslyCompleted);
         return previouslyCompleted;
-//        }
     }
 
     public boolean isAllowedMoreRecords(TopicPartition tp) {
@@ -373,20 +354,16 @@ public class PartitionMonitor<K, V> implements ConsumerRebalanceListener {
     }
 
     public boolean isPartitionAssigned(ConsumerRecord<K, V> rec) {
-//        Optional<PartitionState<K, V>> partitionState = getPartitionState(toTopicPartition(rec));
         PartitionState<K, V> partitionState = getPartitionState(toTopicPartition(rec));
         // TODO check
-        return partitionState != null && partitionState.getClass().isAssignableFrom(RemovedPartitionState.class);
+        boolean partitionAbsent = partitionState != null;
+        boolean partitionRemoved = partitionState.getClass().isAssignableFrom(RemovedPartitionState.class);
+        return partitionAbsent && partitionRemoved;
     }
 
     public void onSuccess(WorkContainer<K, V> wc) {
-//        Optional<PartitionState<K, V>> partitionState = getPartitionState(wc.getTopicPartition());
         PartitionState<K, V> partitionState = getPartitionState(wc.getTopicPartition());
-//        if (partitionState.isPresent()) {
         partitionState.onSuccess(wc);
-//        } else {
-//            log.debug("Dropping completed work container for partition no longer assigned. WC: {}", wc);
-//        }
     }
 
     /**
