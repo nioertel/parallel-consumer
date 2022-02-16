@@ -10,10 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 
-import java.util.HashSet;
 import java.util.NavigableMap;
 import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * No op version of {@link PartitionState} used for when partition assignments are removed
@@ -25,8 +23,8 @@ import java.util.concurrent.ConcurrentSkipListMap;
 public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
 
     // todo warnings
-    private static final ConcurrentSkipListMap EMPTY_MAP = new ConcurrentSkipListMap<>();
-    private static final HashSet<Long> EMPTY_SET = new HashSet<>();
+//    private static final ConcurrentSkipListMap EMPTY_MAP = new ConcurrentSkipListMap<>();
+//    private static final HashSet<Long> EMPTY_SET = new HashSet<>();
 
     // todo can set instance generics in a static context?
     private static final PartitionState singleton = new RemovedPartitionState();
@@ -53,6 +51,7 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     @Override
     public Set<Long> getIncompleteOffsets() {
         log.debug("no-op");
+        // todo remove state access - invert
         return EMPTY_SET;
     }
 
@@ -71,6 +70,7 @@ public class RemovedPartitionState<K, V> extends PartitionState<K, V> {
     @Override
     NavigableMap<Long, WorkContainer<K, V>> getCommitQueues() {
         log.debug("no-op");
+        // todo remove state access - invert
         return EMPTY_MAP;
     }
 
