@@ -1,27 +1,5 @@
 package io.confluent.parallelconsumer.internal;
 
-import static io.confluent.csid.utils.BackportUtils.toSeconds;
-import static io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor.MDC_INSTANCE_ID;
-import static io.confluent.parallelconsumer.internal.State.closed;
-import static io.confluent.parallelconsumer.internal.State.running;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-
-import java.time.Duration;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
-
-import javax.naming.InitialContext;
-import javax.naming.NamingException;
-
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.common.TopicPartition;
-import org.slf4j.MDC;
-
 /*-
  * Copyright (C) 2020-2022 Confluent, Inc.
  */
@@ -33,6 +11,22 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.TopicPartition;
+import org.slf4j.MDC;
+
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
+import java.time.Duration;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.*;
+
+import static io.confluent.csid.utils.BackportUtils.toSeconds;
+import static io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor.MDC_INSTANCE_ID;
+import static io.confluent.parallelconsumer.internal.State.closed;
+import static io.confluent.parallelconsumer.internal.State.running;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
  * Subsystem for polling the broker for messages.
