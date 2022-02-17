@@ -1,7 +1,29 @@
 package io.confluent.parallelconsumer.internal;
 
+import static io.confluent.csid.utils.BackportUtils.toSeconds;
+import static io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor.MDC_INSTANCE_ID;
+import static io.confluent.parallelconsumer.internal.State.closed;
+import static io.confluent.parallelconsumer.internal.State.running;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
+import java.time.Duration;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
+
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
+
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.TopicPartition;
+import org.slf4j.MDC;
+
 /*-
- * Copyright (C) 2020-2021 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
 
 import io.confluent.parallelconsumer.ParallelConsumerOptions;
@@ -11,22 +33,6 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.common.TopicPartition;
-import org.slf4j.MDC;
-
-import javax.naming.InitialContext;
-import javax.naming.NamingException;
-import java.time.Duration;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.*;
-
-import static io.confluent.csid.utils.BackportUtils.toSeconds;
-import static io.confluent.parallelconsumer.internal.AbstractParallelEoSStreamProcessor.MDC_INSTANCE_ID;
-import static io.confluent.parallelconsumer.internal.State.closed;
-import static io.confluent.parallelconsumer.internal.State.running;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
  * Subsystem for polling the broker for messages.
@@ -43,6 +49,11 @@ public class BrokerPollSystem<K, V> implements OffsetCommitter {
 
     private Optional<Future<Boolean>> pollControlThreadFuture;
 
+    /**
+     * While {@link io.confluent.parallelconsumer.internal.State#paused paused} is an externally controlled state that
+     * temporarily stops polling and work registration, the {@code paused} flag is used internally to pause subscriptions
+     * if polling needs to be throttled.
+     */
     @Getter
     private volatile boolean paused = false;
 
@@ -134,6 +145,18 @@ public class BrokerPollSystem<K, V> implements OffsetCommitter {
                     }
                     case closing -> {
                         doClose();
+                    }
+                }
+
+                if (state == State.paused) {
+                    // as long as the state is paused, this loop doesn't do any I/O work
+                    // therefor we sleep for 100 ms to reduce CPU load
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        log.debug("Loop: Sleep in state paused was interrupted.");
+                        // swallow the exception and just go back to business, keeping the interrupt state set
+                        Thread.currentThread().interrupt();
                     }
                 }
             }
@@ -323,5 +346,37 @@ public class BrokerPollSystem<K, V> implements OffsetCommitter {
     public void wakeupIfPaused() {
         if (paused)
             consumerManager.wakeup();
+    }
+
+    /**
+     * Pause polling from the underlying Kafka Broker.
+     * <p>
+     * Note: If the poll system is currently not in state {@link io.confluent.parallelconsumer.internal.State#running running},
+     * calling this method will be a no-op.
+     * </p>
+     */
+    public void pausePollingAndWorkRegistrationIfRunning() {
+        if (this.state == State.running) {
+            log.debug("Transitioning broker poll system to state paused.");
+            this.state = State.paused;
+        } else {
+            log.debug("Skipping transition of broker poll system to state paused. Current state is {}.", this.state);
+        }
+    }
+
+    /**
+     * Resume polling from the underlying Kafka Broker.
+     * <p>
+     * Note: If the poll system is currently not in state {@link io.confluent.parallelconsumer.internal.State#paused paused},
+     * calling this method will be a no-op.
+     * </p>
+     */
+    public void resumePollingAndWorkRegistrationIfPaused() {
+        if (this.state == State.paused) {
+            log.debug("Transitioning broker poll system to state running.");
+            this.state = State.running;
+        } else {
+            log.debug("Skipping transition of broker poll system to state running. Current state is {}.", this.state);
+        }
     }
 }
