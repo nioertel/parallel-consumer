@@ -1,9 +1,8 @@
 package io.confluent.parallelconsumer.internal;
 
 /*-
- * Copyright (C) 2020-2021 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
-
 import io.confluent.csid.utils.WallClock;
 import io.confluent.parallelconsumer.ParallelConsumer;
 import io.confluent.parallelconsumer.ParallelConsumerOptions;
@@ -542,8 +541,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
     protected <R> void supervisorLoop(Function<ConsumerRecord<K, V>, List<R>> userFunction,
                                       Consumer<R> callback) {
-        log.info("Control loop starting up...");
-
         if (state != State.unused) {
             throw new IllegalStateException(msg("Invalid state - the consumer cannot be used more than once (current " +
                     "state is {})", state));
@@ -551,12 +548,24 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             state = running;
         }
 
+        // broker poll subsystem
+        brokerPollSubsystem.start(options.getManagedExecutorService());
+
+        ExecutorService executorService;
+        try {
+            executorService = InitialContext.doLookup(options.getManagedExecutorService());
+        } catch (NamingException e) {
+            log.debug("Using Java SE Thread", e);
+            executorService = Executors.newSingleThreadExecutor();
+        }
+
+
         // run main pool loop in thread
         Callable<Boolean> controlTask = () -> {
-            Thread controlThread = Thread.currentThread();
             addInstanceMDC();
+            log.info("Control loop starting up...");
+            Thread controlThread = Thread.currentThread();
             controlThread.setName("pc-control");
-            log.trace("Control task scheduled");
             this.blockableControlThread = controlThread;
             while (state != closed) {
                 try {
@@ -571,16 +580,6 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
             log.info("Control loop ending clean (state:{})...", state);
             return true;
         };
-
-        brokerPollSubsystem.start(options.getManagedExecutorService());
-
-        ExecutorService executorService;
-        try {
-            executorService = InitialContext.doLookup(options.getManagedExecutorService());
-        } catch (NamingException e) {
-            log.debug("Using Java SE Thread", e);
-            executorService = Executors.newSingleThreadExecutor();
-        }
         Future<Boolean> controlTaskFutureResult = executorService.submit(controlTask);
         this.controlThreadFuture = Optional.of(controlTaskFutureResult);
     }
@@ -659,7 +658,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         //
         if (state == running || state == draining) {
             int delta = calculateQuantityToRequest();
-            var records = wm.maybeGetWork(delta);
+            var records = wm.maybeGetWorkIfAvailable(delta);
 
             gotWorkCount = records.size();
             lastWorkRequestWasFulfilled = gotWorkCount >= delta;

@@ -1,9 +1,8 @@
 package io.confluent.parallelconsumer.offsets;
 
 /*-
- * Copyright (C) 2020-2021 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
-
 import io.confluent.parallelconsumer.internal.InternalRuntimeError;
 import io.confluent.parallelconsumer.state.PartitionState;
 import lombok.Value;
@@ -113,7 +112,7 @@ public class OffsetMapCodecManager<K, V> {
             try {
                 lastCommittedOffsets = consumer.committed(assignment);
             } catch (WakeupException exception) {
-                log.warn("Woken up trying to get assignment", exception);
+                log.debug("Woken up trying to get assignment", exception);
                 lastWakeupException = exception;
             }
             attempts++;
