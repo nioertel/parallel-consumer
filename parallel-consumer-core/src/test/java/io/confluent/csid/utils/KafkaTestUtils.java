@@ -1,9 +1,8 @@
 package io.confluent.csid.utils;
 
 /*-
- * Copyright (C) 2020-2021 Confluent, Inc.
+ * Copyright (C) 2020-2022 Confluent, Inc.
  */
-
 import io.confluent.parallelconsumer.offsets.OffsetMapCodecManager;
 import io.confluent.parallelconsumer.state.WorkContainer;
 import io.confluent.parallelconsumer.state.WorkManager;
@@ -262,5 +261,11 @@ public class KafkaTestUtils {
         wc.onUserFunctionSuccess();
         wmm.onSuccess(wc);
         assertThat(wc.isUserFunctionComplete()).isTrue();
+    }
+
+    public List<ConsumerRecord<String, String>> sendRecords(final int i) {
+        List<ConsumerRecord<String, String>> consumerRecords = generateRecords(i);
+        send(consumerSpy, consumerRecords);
+        return consumerRecords;
     }
 }

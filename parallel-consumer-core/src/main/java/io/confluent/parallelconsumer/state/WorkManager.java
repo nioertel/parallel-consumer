@@ -3,7 +3,6 @@ package io.confluent.parallelconsumer.state;
 /*-
  * Copyright (C) 2020-2022 Confluent, Inc.
  */
-
 import io.confluent.csid.utils.LoopingResumingIterator;
 import io.confluent.csid.utils.WallClock;
 import io.confluent.parallelconsumer.ParallelConsumerOptions;
@@ -188,6 +187,16 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
      */
     // todo refactor - move into it's own class perhaps
     public List<WorkContainer<K, V>> maybeGetWorkIfAvailable(int requestedMaxWorkToRetrieve) {
+        // TODO: this is just a temporary solution to allow for more messages to arrive before batches are created.
+        // This ensures an average batch size that is more close to the requested batch size, since this method will
+        // return more work. Probably this should be refactored to be part of the method "tryToEnsureAvailableCapacity".
+        // TODO: Also we should only wait in case not enough records are present.
+        try {
+            Thread.sleep(getOptions().getProcessorDelayMs());
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
         int workToGetDelta = requestedMaxWorkToRetrieve;
 
         // optimise early
@@ -374,6 +383,18 @@ public class WorkManager<K, V> implements ConsumerRebalanceListener {
 
     public boolean hasCommittableOffsets() {
         return pm.isDirty();
+    }
+
+    /**
+     * Have our partitions been revoked? Can a batch contain messages of different epochs?
+     *
+     * @return true if any epoch is stale, false if not
+     */
+    public boolean checkEpochIsStale(final List<WorkContainer<K, V>> workContainers) {
+        for (final WorkContainer<K, V> workContainer : workContainers) {
+            if (checkEpochIsStale(workContainer)) return true;
+        }
+        return false;
     }
 
     /**
