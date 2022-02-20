@@ -613,7 +613,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         log.trace("Loop: Process mailbox");
         processWorkCompleteMailBox();
 
-        if (state == running) {
+        if (state == running || state == paused) {
             // offsets will be committed when the consumer has its partitions revoked
             log.trace("Loop: Maybe commit");
             commitOffsetsMaybe();
@@ -811,7 +811,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         for (var work : results) {
             MDC.put("offset", work.toString());
             wm.handleFutureResult(work);
-            MDC.clear();
+            MDC.remove("offset");
         }
     }
 
@@ -874,7 +874,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
     private Duration getTimeToNextCommitCheck() {
         // draining is a normal running mode for the controller
-        if (state == running || state == draining) {
+        if (state == running || state == draining || state == paused) {
             Duration timeSinceLastCommit = getTimeSinceLastCommit();
             Duration timeBetweenCommits = getTimeBetweenCommits();
             Duration minus = timeBetweenCommits.minus(timeSinceLastCommit);
@@ -1042,6 +1042,28 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
                 this.commitCommand.set(false);
             }
             return commitAsap;
+        }
+    }
+
+    @Override
+    public void pauseIfRunning() {
+        if (this.state == State.running) {
+            log.info("Transitioning parallel consumer to state paused.");
+            this.state = State.paused;
+            brokerPollSubsystem.pausePollingAndWorkRegistrationIfRunning();
+        } else {
+            log.info("Skipping transition of parallel consumer to state paused. Current state is {}.", this.state);
+        }
+    }
+
+    @Override
+    public void resumeIfPaused() {
+        if (this.state == State.paused) {
+            log.info("Transitioning paarallel consumer to state running.");
+            brokerPollSubsystem.resumePollingAndWorkRegistrationIfPaused();
+            this.state = State.running;
+        } else {
+            log.info("Skipping transition of parallel consumer to state running. Current state is {}.", this.state);
         }
     }
 
