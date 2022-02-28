@@ -53,6 +53,12 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
     public static final String MDC_INSTANCE_ID = "pcId";
 
+    /**
+     * Key for the work container descriptor that will be added to the {@link MDC diagnostic context} while inside a
+     * user function.
+     */
+    public static final String MDC_WORK_CONTAINER_DESCRIPTOR = "offset";
+
     @Getter(PROTECTED)
     private final ParallelConsumerOptions options;
 
@@ -810,9 +816,9 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
         log.trace("Processing drained work {}...", results.size());
         for (var work : results) {
-            MDC.put("offset", work.toString());
+            MDC.put(MDC_WORK_CONTAINER_DESCRIPTOR, work.toString());
             wm.handleFutureResult(work);
-            MDC.remove("offset");
+            MDC.remove(MDC_WORK_CONTAINER_DESCRIPTOR);
         }
     }
 
@@ -935,7 +941,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         // call the user's function
         List<R> resultsFromUserFunction;
         try {
-            MDC.put("offset", wc.toString());
+            MDC.put(MDC_WORK_CONTAINER_DESCRIPTOR, wc.toString());
 
             //
             boolean epochIsStale = wm.checkEpochIsStale(wc);
