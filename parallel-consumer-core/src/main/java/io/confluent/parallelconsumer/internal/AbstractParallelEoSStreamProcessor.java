@@ -54,6 +54,12 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
     public static final String MDC_INSTANCE_ID = "pcId";
 
+    /**
+     * Key for the work container descriptor that will be added to the {@link MDC diagnostic context} while inside a
+     * user function.
+     */
+    public static final String MDC_WORK_CONTAINER_DESCRIPTOR = "offset";
+
     @Getter(PROTECTED)
     protected final ParallelConsumerOptions options;
 
@@ -882,9 +888,9 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
 
         log.trace("Processing drained work {}...", results.size());
         for (var work : results) {
-            MDC.put("offset", work.toString());
+            MDC.put(MDC_WORK_CONTAINER_DESCRIPTOR, work.toString());
             wm.handleFutureResult(work);
-            MDC.remove("offset");
+            MDC.remove(MDC_WORK_CONTAINER_DESCRIPTOR);
         }
     }
 
@@ -989,7 +995,7 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         try {
             if (log.isDebugEnabled()) {
                 // toString can be heavy, especially for large batch sizes
-                MDC.put("offset", workContainerBatch.toString());
+                MDC.put(MDC_WORK_CONTAINER_DESCRIPTOR, workContainerBatch.toString());
             }
             log.trace("Pool received: {}", workContainerBatch);
 
@@ -1114,9 +1120,8 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
         if (this.state == State.running) {
             log.info("Transitioning parallel consumer to state paused.");
             this.state = State.paused;
-            brokerPollSubsystem.pausePollingAndWorkRegistrationIfRunning();
         } else {
-            log.info("Skipping transition of parallel consumer to state paused. Current state is {}.", this.state);
+            log.debug("Skipping transition of parallel consumer to state paused. Current state is {}.", this.state);
         }
     }
 
@@ -1124,10 +1129,9 @@ public abstract class AbstractParallelEoSStreamProcessor<K, V> implements Parall
     public void resumeIfPaused() {
         if (this.state == State.paused) {
             log.info("Transitioning paarallel consumer to state running.");
-            brokerPollSubsystem.resumePollingAndWorkRegistrationIfPaused();
             this.state = State.running;
         } else {
-            log.info("Skipping transition of parallel consumer to state running. Current state is {}.", this.state);
+            log.debug("Skipping transition of parallel consumer to state running. Current state is {}.", this.state);
         }
     }
 
